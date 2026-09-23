@@ -400,10 +400,10 @@ extern "C" bool __cdecl ShroudforgeEcsDescribe(const char* name, std::uint32_t* 
 }
 extern "C" std::size_t __cdecl ShroudforgeEcsQuery(const char* const* names, std::size_t count,
                                                     std::uint32_t* entities, std::size_t capacity) {
-    if (!names || !count || count > max_components || capacity > (1u << 20) || !ShroudforgeEcsReady()) return 0;
+    if (!names || !count || count > max_components || capacity > (1u << 20) || !ShroudforgeEcsReady()) return SIZE_MAX;
     auto operation = std::make_shared<QueryOperation>();
     for (std::size_t index = 0; index < count; ++index) {
-        if (!names[index]) return 0;
+        if (!names[index]) return SIZE_MAX;
         operation->owned_names.emplace_back(names[index]);
     }
     for (const auto& name : operation->owned_names) operation->name_pointers.push_back(name.c_str());
@@ -412,7 +412,7 @@ extern "C" std::size_t __cdecl ShroudforgeEcsQuery(const char* const* names, std
     operation->output.resize(capacity);
     operation->entities = operation->output.data();
     operation->capacity = capacity;
-    if (!GameThreadDispatcher::Invoke(query_on_game_thread, operation)) return 0;
+    if (!GameThreadDispatcher::Invoke(query_on_game_thread, operation)) return SIZE_MAX;
     if (entities) std::copy_n(operation->output.begin(), (std::min)(capacity, operation->result), entities);
     return operation->result;
 }
