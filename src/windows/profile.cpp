@@ -21,10 +21,9 @@ bool Load() {
         if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
         const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
         if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return false;
-        const auto directory = root / "config/runtime/profiles";
-        nlohmann::json selected;
-        unsigned fallback_count{};
-        bool exact{};
+        const auto directory = root / "runtime/compatibility/profiles";
+        nlohmann::json exact_profile, fallback_profile;
+        unsigned exact_count{}, fallback_count{};
         for (const auto& entry : std::filesystem::directory_iterator(directory)) {
             if (entry.path().extension() != ".json") continue;
             auto candidate = nlohmann::json::parse(std::ifstream(entry.path()));
@@ -32,16 +31,23 @@ bool Load() {
             const bool matches = candidate.at("image").at("timestamp") == nt->FileHeader.TimeDateStamp &&
                 candidate.at("image").at("size") == nt->OptionalHeader.SizeOfImage;
             if (matches) {
-                if (exact) { status = "ambiguous-exact-profile"; return false; }
-                selected = candidate; exact = true;
+                ++exact_count;
+                exact_profile = std::move(candidate);
             } else if (candidate.value("allowStructuralRevalidation", false)) {
                 ++fallback_count;
-                if (!exact) selected = candidate;
+                fallback_profile = std::move(candidate);
             }
         }
-        if (selected.is_null() || (!exact && fallback_count != 1)) {
+        // Exact image identity always takes precedence over every opt-in
+        // structural fallback, regardless of file enumeration order.
+        const bool exact = exact_count == 1;
+        if (exact_count > 1) {
+            status = "ambiguous-exact-profile"; return false;
+        }
+        if (exact_count == 0 && fallback_count != 1) {
             status = "missing-or-ambiguous-profile"; return false;
         }
+        const auto& selected = exact ? exact_profile : fallback_profile;
         // Identity is a lookup hint. Both hooks still require unique executable
         // matches and exact overwritten instructions before any patch is made.
         image_timestamp = nt->FileHeader.TimeDateStamp;

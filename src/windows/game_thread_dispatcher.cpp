@@ -35,6 +35,7 @@ std::atomic<std::uint32_t> engine_thread{};
 std::atomic<std::uintptr_t> entity_manager{};
 std::atomic<bool> command_observed{};
 std::atomic<std::uint64_t> last_drain_ms{}, drain_count{}, completed_count{}, timeout_count{}, rejected_count{};
+std::atomic<std::uint64_t> manager_changes{}, last_manager_observation_ms{}, last_operation_us{}, maximum_operation_us{};
 struct InstalledHook {
     std::uintptr_t target{};
     void* payload{};
@@ -197,6 +198,7 @@ void __cdecl drain(void*, void*) {
         }
         unsigned queued = 0;
         if (job->state.compare_exchange_strong(queued, 1, std::memory_order_acq_rel) && job->operation) {
+            const auto operation_started = std::chrono::steady_clock::now();
             try {
                 job->operation(job->context.get());
                 job->executed.store(true, std::memory_order_release);
@@ -205,6 +207,10 @@ void __cdecl drain(void*, void*) {
             } catch (...) {
                 // Never unwind a C++ exception through the engine trampoline.
             }
+            const auto duration = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - operation_started).count());
+            last_operation_us.store(duration, std::memory_order_relaxed);
+            auto maximum = maximum_operation_us.load(std::memory_order_relaxed);
+            while (maximum < duration && !maximum_operation_us.compare_exchange_weak(maximum, duration, std::memory_order_relaxed)) {}
             job->state.store(2, std::memory_order_release);
         }
         SetEvent(job->complete);
@@ -218,7 +224,11 @@ void __cdecl capture_entity_manager(void* lookup_context, void*) {
         const auto root = *static_cast<std::uintptr_t*>(lookup_context);
         if (!root) return;
         const auto manager = *reinterpret_cast<std::uintptr_t*>(root + ShroudforgeCompatibility::EnshroudedClient::lookup_manager);
-        if (manager) entity_manager.store(manager, std::memory_order_release);
+        if (manager) {
+            if (entity_manager.exchange(manager, std::memory_order_acq_rel) != manager)
+                manager_changes.fetch_add(1, std::memory_order_relaxed);
+            last_manager_observation_ms.store(GetTickCount64(), std::memory_order_relaxed);
+        }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
@@ -378,10 +388,14 @@ bool Invoke(Operation operation, std::shared_ptr<void> context, std::uint32_t ti
 
 std::string Diagnostics() {
     const auto last = last_drain_ms.load(std::memory_order_relaxed);
+    const auto manager_last = last_manager_observation_ms.load(std::memory_order_relaxed);
     std::unique_lock lock(queue_mutex, std::try_to_lock);
     return nlohmann::json({
         {"accepting", accepting.load()}, {"threadId", engine_thread.load()},
         {"entityManagerObserved", entity_manager.load() != 0},
+        {"entityManagerChanges", manager_changes.load()},
+        {"lastManagerObservationAgeMs", manager_last ? nlohmann::json(GetTickCount64() - manager_last) : nlohmann::json(nullptr)},
+        {"lastOperationUs", last_operation_us.load()}, {"maximumOperationUs", maximum_operation_us.load()},
         {"lastDrainAgeMs", last ? nlohmann::json(GetTickCount64() - last) : nlohmann::json(nullptr)},
         {"drainCount", drain_count.load()}, {"completed", completed_count.load()},
         {"timeouts", timeout_count.load()}, {"rejected", rejected_count.load()},

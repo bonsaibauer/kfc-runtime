@@ -15,7 +15,7 @@ inline nlohmann::json Read(const std::filesystem::path& root) {
     if (now >= next) {
         next = now + std::chrono::milliseconds(500);
         try {
-            std::ifstream input(root / "config/loader/shroudforge.json");
+            std::ifstream input(root / "config/shroudforge.json");
             if (input) {
                 auto value = nlohmann::json::parse(input);
                 const auto& logging = value.at("logging");

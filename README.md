@@ -6,15 +6,19 @@ Build with `cmake -S . -B build -A x64` and
 `cmake --build build --config Release`. Install using
 `cmake --install build --config Release --prefix <staging-directory>`.
 
-The DLL and `config/runtime` belong next to the game executable.
+The DLL belongs next to the game executable. Runtime profiles are read from
+`runtime/compatibility/profiles/` and shipped there by the release build.
 Provider ABI 1 exports `KfcRuntimeAbi`, Initialize/Tick/Shutdown/Status and the
 `ShroudforgeEcs*` component interface. Existing consumers must check ABI 1
 before resolving operations. JSON profiles can change without rebuilding the
 loader. Changes to native behavior require a new runtime DLL; incompatible
 provider ABI changes also require a host update.
 
-Profiles are selected by process target and image identity. An explicitly
-opted-in profile can undergo structural revalidation for a changed image:
+Profiles are selected for the running process by executable name and PE image
+timestamp and size. A unique exact image match always takes priority. If there
+is no exact match, structural revalidation is allowed only when exactly one
+profile for that executable opts in. An opted-in profile must pass structural
+checks for a changed image:
 both hook signatures must match uniquely, overwritten bytes must match, parser
 component sizes must agree, and live accesses validate identity and stride.
 These checks are not proof that every engine semantic remains unchanged.
