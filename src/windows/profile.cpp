@@ -20,7 +20,7 @@ bool Load() {
         if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
         const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
         if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return false;
-        const auto directory = root / "config/compatibility/profiles";
+        const auto directory = root / "config/runtime/profiles";
         nlohmann::json selected;
         unsigned fallback_count{};
         bool exact{};
