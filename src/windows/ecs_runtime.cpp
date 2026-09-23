@@ -165,7 +165,7 @@ struct QueryOperation {
     std::size_t count{};
     std::uint32_t* entities{};
     std::size_t capacity{};
-    std::size_t result{};
+    std::size_t result{SIZE_MAX};
     std::vector<std::string> owned_names;
     std::vector<const char*> name_pointers;
     std::vector<std::uint32_t> output;
@@ -178,6 +178,7 @@ void query_on_game_thread(void* opaque) {
     ResolvedLayout layout{};
     std::vector<std::uintptr_t> pointers;
     if (!layout_snapshot(layout) || !entity_pointers(layout, pointers)) return;
+    operation.result = 0;
     for (const auto pointer : pointers) {
         EntityView entity{};
         if (!entity_view(pointer, layout, entity)) continue;
@@ -413,6 +414,7 @@ extern "C" std::size_t __cdecl ShroudforgeEcsQuery(const char* const* names, std
     operation->entities = operation->output.data();
     operation->capacity = capacity;
     if (!GameThreadDispatcher::Invoke(query_on_game_thread, operation)) return SIZE_MAX;
+    if (operation->result == SIZE_MAX) return SIZE_MAX;
     if (entities) std::copy_n(operation->output.begin(), (std::min)(capacity, operation->result), entities);
     return operation->result;
 }
