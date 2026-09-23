@@ -308,12 +308,13 @@ bool Initialize() {
 void Shutdown() {
     accepting.store(false, std::memory_order_release);
     for (auto iterator = hooks.rbegin(); iterator != hooks.rend(); ++iterator) {
-        if (iterator->target && iterator->original.size())
-            write_code(iterator->target, iterator->original.data(), iterator->original.size());
+        if (iterator->target && iterator->original.size() &&
+            write_code(iterator->target, iterator->original.data(), iterator->original.size()))
+            iterator->target = 0;
         // A thread may still have a trampoline return address on its stack.
         // Retain the small published allocation until process exit.
     }
-    hooks.clear();
+    std::erase_if(hooks, [](const InstalledHook& hook) { return !hook.target; });
     engine_thread.store(0, std::memory_order_release);
     entity_manager.store(0, std::memory_order_release);
     command_observed.store(false, std::memory_order_release);
