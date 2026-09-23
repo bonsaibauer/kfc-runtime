@@ -14,6 +14,7 @@ namespace EcsRuntime {
 bool Initialize();
 void Tick();
 std::string Status();
+std::string Diagnostics();
 void Shutdown();
 }
 

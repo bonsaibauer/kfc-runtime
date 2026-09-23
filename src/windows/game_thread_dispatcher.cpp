@@ -1,6 +1,7 @@
 #include "game_thread_dispatcher.h"
 
 #include "profile.h"
+#include "../../third_party/nlohmann/json.hpp"
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -33,6 +34,7 @@ std::atomic<bool> accepting{};
 std::atomic<std::uint32_t> engine_thread{};
 std::atomic<std::uintptr_t> entity_manager{};
 std::atomic<bool> command_observed{};
+std::atomic<std::uint64_t> last_drain_ms{}, drain_count{}, completed_count{}, timeout_count{}, rejected_count{};
 struct InstalledHook {
     std::uintptr_t target{};
     void* payload{};
@@ -182,6 +184,8 @@ bool write_code(std::uintptr_t address, const void* bytes, std::size_t size) {
 void __cdecl drain(void*, void*) {
     if (!accepting.load(std::memory_order_acquire)) return;
     engine_thread.store(GetCurrentThreadId(), std::memory_order_release);
+    last_drain_ms.store(GetTickCount64(), std::memory_order_relaxed);
+    drain_count.fetch_add(1, std::memory_order_relaxed);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
     for (unsigned index = 0; index < 8; ++index) {
         std::shared_ptr<Job> job;
@@ -197,6 +201,7 @@ void __cdecl drain(void*, void*) {
                 job->operation(job->context.get());
                 job->executed.store(true, std::memory_order_release);
                 command_observed.store(true, std::memory_order_release);
+                completed_count.fetch_add(1, std::memory_order_relaxed);
             } catch (...) {
                 // Never unwind a C++ exception through the engine trampoline.
             }
@@ -351,11 +356,15 @@ bool Invoke(Operation operation, std::shared_ptr<void> context, std::uint32_t ti
     job->context = std::move(context);
     {
         std::scoped_lock lock(queue_mutex);
-        if (!accepting.load(std::memory_order_relaxed) || queue.size() >= 128) return false;
+        if (!accepting.load(std::memory_order_relaxed) || queue.size() >= 128) {
+            rejected_count.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
         queue.push_back(job);
     }
     if (WaitForSingleObject(job->complete, timeout_ms) == WAIT_OBJECT_0)
         return job->executed.load(std::memory_order_acquire);
+    timeout_count.fetch_add(1, std::memory_order_relaxed);
     unsigned queued = 0;
     if (job->state.compare_exchange_strong(queued, 3, std::memory_order_acq_rel)) {
         std::scoped_lock lock(queue_mutex);
@@ -365,5 +374,19 @@ bool Invoke(Operation operation, std::shared_ptr<void> context, std::uint32_t ti
     // An executing operation retains its own buffers. The caller must not
     // inspect those buffers after a timeout or assume a write was cancelled.
     return false;
+}
+
+std::string Diagnostics() {
+    const auto last = last_drain_ms.load(std::memory_order_relaxed);
+    std::unique_lock lock(queue_mutex, std::try_to_lock);
+    return nlohmann::json({
+        {"accepting", accepting.load()}, {"threadId", engine_thread.load()},
+        {"entityManagerObserved", entity_manager.load() != 0},
+        {"lastDrainAgeMs", last ? nlohmann::json(GetTickCount64() - last) : nlohmann::json(nullptr)},
+        {"drainCount", drain_count.load()}, {"completed", completed_count.load()},
+        {"timeouts", timeout_count.load()}, {"rejected", rejected_count.load()},
+        {"queueDepth", lock ? nlohmann::json(queue.size()) : nlohmann::json(nullptr)},
+        {"queueLimit",128}, {"batchLimit",8}, {"batchBudgetMs",2}
+    }).dump();
 }
 }

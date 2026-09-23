@@ -10,6 +10,14 @@ KFC_EXPORT void __cdecl KfcRuntimeTick() {
     try { EcsRuntime::Tick(); } catch (...) { EcsRuntime::Shutdown(); }
 }
 KFC_EXPORT void __cdecl KfcRuntimeShutdown() { EcsRuntime::Shutdown(); }
+KFC_EXPORT void __cdecl KfcRuntimeDiagnostics(char* buffer, std::size_t capacity) {
+    if (!buffer || !capacity) return;
+    try {
+        const auto text = EcsRuntime::Diagnostics();
+        if (text.size() >= capacity) { buffer[0] = 0; return; }
+        std::memcpy(buffer, text.data(), text.size()); buffer[text.size()] = 0;
+    } catch (...) { buffer[0] = 0; }
+}
 KFC_EXPORT void __cdecl KfcRuntimeStatus(char* buffer, std::size_t capacity) {
     if (!buffer || !capacity) return;
     try {

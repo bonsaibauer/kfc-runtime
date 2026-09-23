@@ -13,6 +13,7 @@ bool Ready();
 std::uint32_t ThreadId();
 std::uintptr_t EntityManager();
 std::string Status();
+std::string Diagnostics();
 
 // Execute immediately when already on the captured engine thread. Otherwise
 // enqueue and wait until the continuous Keen update consumes the command.

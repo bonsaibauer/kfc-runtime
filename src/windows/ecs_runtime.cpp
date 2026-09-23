@@ -1,5 +1,6 @@
 #include "ecs_runtime.h"
 #include "game_thread_dispatcher.h"
+#include "../../third_party/nlohmann/json.hpp"
 #include "profile.h"
 
 #include <windows.h>
@@ -342,6 +343,16 @@ std::string Status() {
          << ",strides=0x" << live_layout.component_strides << std::dec << '}'
          << " epoch=" << layout_epoch;
     return text.str();
+}
+std::string Diagnostics() {
+    std::scoped_lock lock(state_mutex);
+    return nlohmann::json({
+        {"schemaVersion",1}, {"providerAbi",1},
+        {"profile",ShroudforgeCompatibility::EnshroudedClient::status},
+        {"configuredTypes",configured_types.size()}, {"resolvedTypes",types.size()},
+        {"layoutReady",layout_ready}, {"layoutEpoch",layout_epoch},
+        {"dispatcher",nlohmann::json::parse(GameThreadDispatcher::Diagnostics())}
+    }).dump();
 }
 void Shutdown() {
     stop_requested.store(true, std::memory_order_release);
