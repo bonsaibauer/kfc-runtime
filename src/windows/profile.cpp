@@ -1,4 +1,5 @@
 #include "profile.h"
+#include "logging_config.h"
 #include <windows.h>
 #include <filesystem>
 #include <fstream>
@@ -80,7 +81,11 @@ bool Load() {
         return true;
     } catch (const std::exception& error) {
         status = std::string("profile-error:") + error.what();
-        OutputDebugStringA(status.c_str());
+        HMODULE self{};
+        wchar_t path[32768]{};
+        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&Load), &self) && GetModuleFileNameW(self,path,32768) &&
+            KfcRuntimeConfig::Allows(std::filesystem::path(path).parent_path(),'E')) OutputDebugStringA(status.c_str());
         return false;
     }
 }
