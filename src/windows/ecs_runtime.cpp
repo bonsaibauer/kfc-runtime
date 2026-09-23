@@ -359,7 +359,7 @@ void Shutdown() {
 extern "C" bool __cdecl ShroudforgeEcsConfigure(const char* const* names,
                                                 const std::uint32_t* sizes,
                                                 std::size_t count) {
-    if (!names || !sizes || count < 2 || count > 20'000) return false;
+    if (!names || !sizes || !count || count > 20'000) return false;
     std::unordered_map<std::string, std::uint32_t> contract;
     for (std::size_t index = 0; index < count; ++index) {
         if (!names[index] || !sizes[index]) return false;
@@ -367,8 +367,6 @@ extern "C" bool __cdecl ShroudforgeEcsConfigure(const char* const* names,
         if (!name.starts_with("keen::ecs::")) return false;
         contract.emplace(name, sizes[index]);
     }
-    if (!contract.contains("keen::ecs::CurrentTransform") ||
-        !contract.contains("keen::ecs::DynamicActiveNpcState")) return false;
     std::scoped_lock lock(state_mutex);
     if (configured_types == contract) return true;
     configured_types = std::move(contract);
