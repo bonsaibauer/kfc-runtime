@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "target",
+    "image",
+    "allowStructuralRevalidation",
+    "layout",
+    "hooks",
+    "components"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target": {
+      "enum": [
+        "enshrouded.exe",
+        "enshrouded_server.exe"
+      ]
+    },
+    "image": {
+      "type": "object",
+      "required": [
+        "timestamp",
+        "size"
+      ],
+      "properties": {
+        "timestamp": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 4096
+        }
+      }
+    },
+    "allowStructuralRevalidation": {
+      "type": "boolean"
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity_manager_count",
+        "entity_manager_table",
+        "component_offsets",
+        "component_strides",
+        "entity_id",
+        "entity_generation",
+        "entity_layout",
+        "entity_storage",
+        "entity_row",
+        "component_bits",
+        "lookup_manager"
+      ],
+      "properties": {
+        "entity_manager_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "entity_manager_table": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "component_offsets": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "component_strides": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "entity_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "entity_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "entity_layout": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "entity_storage": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "entity_row": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "component_bits": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "lookup_manager": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "game_thread",
+        "entity_manager"
+      ],
+      "properties": {
+        "game_thread": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "signature",
+            "original"
+          ],
+          "properties": {
+            "signature": {
+              "type": "string",
+              "minLength": 14
+            },
+            "original": {
+              "type": "array",
+              "minItems": 5,
+              "maxItems": 32,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            }
+          }
+        },
+        "entity_manager": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "signature",
+            "original"
+          ],
+          "properties": {
+            "signature": {
+              "type": "string",
+              "minLength": 14
+            },
+            "original": {
+              "type": "array",
+              "minItems": 5,
+              "maxItems": 32,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "index",
+          "size"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^keen::ecs::"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1023
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        }
+      }
+    }
+  }
+}

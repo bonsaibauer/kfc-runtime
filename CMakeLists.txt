@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.24)
+project(kfc-runtime VERSION 1.0.0 LANGUAGES CXX)
+if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "The current engine provider requires Windows x64")
+endif()
+add_library(kfc-runtime SHARED
+    src/windows/ecs_runtime.cpp src/windows/game_thread_dispatcher.cpp
+    src/windows/profile.cpp src/windows/provider.cpp)
+target_compile_features(kfc-runtime PRIVATE cxx_std_20)
+target_compile_definitions(kfc-runtime PRIVATE KFC_RUNTIME_BUILD WIN32_LEAN_AND_MEAN NOMINMAX)
+set_property(TARGET kfc-runtime PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+if(MSVC)
+    target_compile_options(kfc-runtime PRIVATE /W4 /EHsc)
+endif()
+install(TARGETS kfc-runtime RUNTIME DESTINATION .)
+install(DIRECTORY compatibility/ DESTINATION config/compatibility)
+install(FILES third_party/nlohmann/LICENSE.MIT DESTINATION licenses/nlohmann-json)

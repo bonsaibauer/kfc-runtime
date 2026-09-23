@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "id": "enshrouded-client-1076226",
+  "target": "enshrouded.exe",
+  "image": {
+    "timestamp": 1782724296,
+    "size": 47869952
+  },
+  "allowStructuralRevalidation": true,
+  "layout": {
+    "entity_manager_count": 344,
+    "entity_manager_table": 392,
+    "component_offsets": 132,
+    "component_strides": 2692,
+    "entity_id": 16,
+    "entity_generation": 20,
+    "entity_layout": 24,
+    "entity_storage": 32,
+    "entity_row": 48,
+    "component_bits": 0,
+    "lookup_manager": 48
+  },
+  "hooks": {
+    "game_thread": {
+      "signature": "33 D2 48 8D 4C 24 30 E8 4E AA 52 00 48 8D 54 24 30 49 8B CF",
+      "original": [
+        51,
+        210,
+        72,
+        141,
+        76,
+        36,
+        48
+      ]
+    },
+    "entity_manager": {
+      "signature": "48 81 C3 88 00 00 00 48 81 FB 80 08 00 00 0F 82 66 FE FF FF",
+      "original": [
+        72,
+        129,
+        195,
+        136,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "components": [
+    {
+      "name": "keen::ecs::DynamicActiveNpcState",
+      "index": 0,
+      "size": 136
+    },
+    {
+      "name": "keen::ecs::ClientPlayerInput",
+      "index": 85,
+      "size": 1392
+    },
+    {
+      "name": "keen::ecs::CurrentTransform",
+      "index": 125,
+      "size": 56
+    },
+    {
+      "name": "keen::ecs::DynamicFallDamage",
+      "index": 199,
+      "size": 16
+    },
+    {
+      "name": "keen::ecs::Inventory",
+      "index": 265,
+      "size": 96
+    },
+    {
+      "name": "keen::ecs::DynamicLocomotion",
+      "index": 302,
+      "size": 312
+    },
+    {
+      "name": "keen::ecs::NetworkStamina",
+      "index": 355,
+      "size": 4
+    },
+    {
+      "name": "keen::ecs::PlayerInput",
+      "index": 404,
+      "size": 1320
+    },
+    {
+      "name": "keen::ecs::ServerConsumedPlayerInput",
+      "index": 462,
+      "size": 216
+    },
+    {
+      "name": "keen::ecs::StaminaDepletion",
+      "index": 499,
+      "size": 4
+    },
+    {
+      "name": "keen::ecs::UsedItem",
+      "index": 566,
+      "size": 4
+    }
+  ]
+}
