@@ -6,7 +6,7 @@ Build with `cmake -S . -B build -A x64` and
 `cmake --build build --config Release`. Install using
 `cmake --install build --config Release --prefix <staging-directory>`.
 
-The DLL and `config/compatibility` belong next to the game executable.
+The DLL and `config/runtime` belong next to the game executable.
 Provider ABI 1 exports `KfcRuntimeAbi`, Initialize/Tick/Shutdown/Status and the
 `ShroudforgeEcs*` component interface. Existing consumers must check ABI 1
 before resolving operations. JSON profiles can change without rebuilding the
@@ -31,3 +31,7 @@ A write that has already started may complete after a timeout: consumers
 must reconcile state before retrying non-idempotent operations.
 
 Third-party dependency: nlohmann/json 3.12.0, MIT; see third_party/nlohmann.
+
+Standalone inspection tools are maintained in ShroudForge under
+`Shroudforge_Modules/runtime-diagnostics/native-tools`. This repository contains
+the native provider, its public interface and build-specific compatibility data.
