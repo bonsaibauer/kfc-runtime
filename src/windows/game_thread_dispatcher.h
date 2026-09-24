@@ -18,5 +18,5 @@ std::string Diagnostics();
 // Execute immediately when already on the captured engine thread. Otherwise
 // enqueue and wait until the continuous Keen update consumes the command.
 // Jobs own all input/output storage, including after a caller times out.
-bool Invoke(Operation operation, std::shared_ptr<void> context, std::uint32_t timeout_ms = 250);
+bool Invoke(Operation operation, std::shared_ptr<void> context, std::uint32_t timeout_ms = 75);
 }

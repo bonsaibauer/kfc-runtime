@@ -341,13 +341,22 @@ void Shutdown() {
     for (const auto& job : cancelled) SetEvent(job->complete);
 }
 
-bool Ready() { return accepting.load(std::memory_order_acquire) && engine_thread.load(std::memory_order_acquire); }
+bool Ready() {
+    const auto drain = last_drain_ms.load(std::memory_order_acquire);
+    return accepting.load(std::memory_order_acquire) &&
+        engine_thread.load(std::memory_order_acquire) && drain &&
+        GetTickCount64() - drain <= 500;
+}
 std::uint32_t ThreadId() { return engine_thread.load(std::memory_order_acquire); }
 std::uintptr_t EntityManager() { return entity_manager.load(std::memory_order_acquire); }
 std::string Status() {
     if (!accepting.load(std::memory_order_acquire)) return "unavailable";
     const auto thread = engine_thread.load(std::memory_order_acquire);
-    if (!thread) return "installed-awaiting-world";
+    if (!thread || !Ready()) {
+        const auto drain = last_drain_ms.load(std::memory_order_acquire);
+        if (drain && GetTickCount64() - drain > 500) return "stale-game-thread";
+        return "installed-awaiting-world";
+    }
     const auto manager = entity_manager.load(std::memory_order_acquire);
     return "ready(thread=" + std::to_string(thread) + ",manager=" +
         (manager ? "ready" : "awaiting-lookup") + ",commands=" +
@@ -392,6 +401,7 @@ std::string Diagnostics() {
     std::unique_lock lock(queue_mutex, std::try_to_lock);
     return nlohmann::json({
         {"accepting", accepting.load()}, {"threadId", engine_thread.load()},
+        {"ready", Ready()},
         {"entityManagerObserved", entity_manager.load() != 0},
         {"entityManagerChanges", manager_changes.load()},
         {"lastManagerObservationAgeMs", manager_last ? nlohmann::json(GetTickCount64() - manager_last) : nlohmann::json(nullptr)},

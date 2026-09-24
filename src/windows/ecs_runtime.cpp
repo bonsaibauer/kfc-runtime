@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <mutex>
@@ -55,6 +56,33 @@ bool layout_ready{};
 std::uintptr_t live_table{};
 std::unordered_map<std::uint32_t, HandleRecord> handles;
 std::unordered_map<std::uint64_t, std::uint32_t> reverse_handles;
+struct QueryScanState {
+    std::uint64_t epoch{};
+    std::uint64_t touched_ms{};
+    std::vector<std::uintptr_t> pointers;
+    std::size_t cursor{};
+    std::vector<std::uint32_t> matches;
+};
+struct QueryCacheEntry {
+    std::uint64_t epoch{};
+    std::uint64_t completed_ms{};
+    std::vector<std::uint32_t> matches;
+};
+std::unordered_map<std::string, QueryScanState> query_scans;
+std::unordered_map<std::string, QueryCacheEntry> query_cache;
+struct ResolveScanState {
+    std::uint64_t epoch{};
+    std::uint64_t touched_ms{};
+    std::vector<std::uintptr_t> pointers;
+    std::size_t cursor{};
+};
+struct ResolveCacheEntry {
+    std::uint64_t epoch{};
+    std::uint64_t completed_ms{};
+    std::uint32_t handle{};
+};
+std::unordered_map<std::uint32_t, ResolveScanState> resolve_scans;
+std::unordered_map<std::uint32_t, ResolveCacheEntry> resolve_cache;
 std::uint32_t next_handle{1};
 std::uint64_t layout_epoch{1};
 std::mutex write_mutex;
@@ -171,46 +199,144 @@ struct QueryOperation {
     std::vector<const char*> name_pointers;
     std::vector<std::uint32_t> output;
 };
+std::string query_key(const QueryOperation& operation) {
+    std::string key;
+    for (const auto& name : operation.owned_names) {
+        key.append(std::to_string(name.size()));
+        key.push_back(':');
+        key.append(name);
+        key.push_back(';');
+    }
+    return key;
+}
+std::uint64_t current_epoch() {
+    std::scoped_lock lock(state_mutex);
+    return layout_epoch;
+}
+void publish_query_result(QueryOperation& operation, const std::vector<std::uint32_t>& matches) {
+    operation.result = matches.size();
+    if (operation.entities && operation.capacity)
+        std::copy_n(matches.begin(), (std::min)(operation.capacity, matches.size()), operation.entities);
+}
 void query_on_game_thread(void* opaque) {
     auto& operation = *static_cast<QueryOperation*>(opaque);
     std::vector<ComponentType> components(operation.count);
     for (std::size_t index = 0; index < operation.count; ++index)
         if (!resolve_component(operation.names[index], components[index])) return;
     ResolvedLayout layout{};
-    std::vector<std::uintptr_t> pointers;
-    if (!layout_snapshot(layout) || !entity_pointers(layout, pointers)) return;
-    operation.result = 0;
-    for (const auto pointer : pointers) {
-        EntityView entity{};
-        if (!entity_view(pointer, layout, entity)) continue;
-        bool include = true;
-        for (const auto& component : components) {
-            std::uintptr_t address{};
-            if (!component_address(entity, layout, component, address)) { include = false; break; }
-        }
-        if (!include) continue;
-        if (operation.entities && operation.result < operation.capacity)
-            operation.entities[operation.result] = handle_for(entity);
-        ++operation.result;
+    if (!layout_snapshot(layout)) return;
+    const auto epoch = current_epoch();
+    const auto now_ms = GetTickCount64();
+    const auto key = query_key(operation);
+    for (auto iterator = query_scans.begin(); iterator != query_scans.end();) {
+        if (now_ms - iterator->second.touched_ms > 2000) iterator = query_scans.erase(iterator);
+        else ++iterator;
     }
+    for (auto iterator = query_cache.begin(); iterator != query_cache.end();) {
+        if (now_ms - iterator->second.completed_ms > 2000) iterator = query_cache.erase(iterator);
+        else ++iterator;
+    }
+    if (auto cached = query_cache.find(key); cached != query_cache.end()) {
+        if (cached->second.epoch == epoch && now_ms - cached->second.completed_ms <= 50) {
+            publish_query_result(operation, cached->second.matches);
+            return;
+        }
+        query_cache.erase(cached);
+    }
+    auto scan = query_scans.find(key);
+    if (scan == query_scans.end() || scan->second.epoch != epoch) {
+        QueryScanState fresh{};
+        fresh.epoch = epoch;
+        fresh.touched_ms = now_ms;
+        if (!entity_pointers(layout, fresh.pointers)) return;
+        scan = query_scans.insert_or_assign(key, std::move(fresh)).first;
+    }
+    auto& progress = scan->second;
+    progress.touched_ms = now_ms;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1);
+    std::size_t visited = 0;
+    for (; progress.cursor < progress.pointers.size() && visited < 256; ++progress.cursor, ++visited) {
+        const auto pointer = progress.pointers[progress.cursor];
+        EntityView entity{};
+        if (entity_view(pointer, layout, entity)) {
+            bool include = true;
+            for (const auto& component : components) {
+                std::uintptr_t address{};
+                if (!component_address(entity, layout, component, address)) { include = false; break; }
+            }
+            if (include) progress.matches.push_back(handle_for(entity));
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            ++progress.cursor;
+            break;
+        }
+    }
+    if (progress.cursor < progress.pointers.size()) {
+        // The caller skips this update and retries on its next tick. This
+        // distinct sentinel keeps an incomplete scan from looking like an
+        // authoritative empty query result.
+        operation.result = SIZE_MAX - 1;
+        return;
+    }
+    auto completed = std::move(progress.matches);
+    query_scans.erase(scan);
+    auto [cached, _] = query_cache.insert_or_assign(key, QueryCacheEntry{epoch, now_ms, std::move(completed)});
+    publish_query_result(operation, cached->second.matches);
 }
 
 struct ResolveOperation { std::uint32_t entity_id{}, result{}; };
 void resolve_on_game_thread(void* opaque) {
     auto& operation = *static_cast<ResolveOperation*>(opaque);
     ResolvedLayout layout{};
-    std::vector<std::uintptr_t> pointers;
-    if (!layout_snapshot(layout) || !entity_pointers(layout, pointers)) return;
-    EntityView matched{};
-    bool found{};
-    for (const auto pointer : pointers) {
-        EntityView candidate{};
-        if (!entity_view(pointer, layout, candidate) || candidate.id != operation.entity_id) continue;
-        if (found) return;
-        matched = candidate;
-        found = true;
+    if (!layout_snapshot(layout)) return;
+    const auto epoch = current_epoch();
+    const auto now_ms = GetTickCount64();
+    for (auto iterator = resolve_scans.begin(); iterator != resolve_scans.end();) {
+        if (now_ms - iterator->second.touched_ms > 2000) iterator = resolve_scans.erase(iterator);
+        else ++iterator;
     }
-    if (found) operation.result = handle_for(matched);
+    for (auto iterator = resolve_cache.begin(); iterator != resolve_cache.end();) {
+        if (now_ms - iterator->second.completed_ms > 2000) iterator = resolve_cache.erase(iterator);
+        else ++iterator;
+    }
+    if (auto cached = resolve_cache.find(operation.entity_id); cached != resolve_cache.end()) {
+        if (cached->second.epoch == epoch && now_ms - cached->second.completed_ms <= 50) {
+            operation.result = cached->second.handle;
+            return;
+        }
+        resolve_cache.erase(cached);
+    }
+    auto scan = resolve_scans.find(operation.entity_id);
+    if (scan == resolve_scans.end() || scan->second.epoch != epoch) {
+        ResolveScanState fresh{};
+        fresh.epoch = epoch;
+        fresh.touched_ms = now_ms;
+        if (!entity_pointers(layout, fresh.pointers)) return;
+        scan = resolve_scans.insert_or_assign(operation.entity_id, std::move(fresh)).first;
+    }
+    auto& progress = scan->second;
+    progress.touched_ms = now_ms;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1);
+    std::size_t visited = 0;
+    for (; progress.cursor < progress.pointers.size() && visited < 256; ++progress.cursor, ++visited) {
+        EntityView candidate{};
+        if (entity_view(progress.pointers[progress.cursor], layout, candidate) &&
+            candidate.id == operation.entity_id) {
+            operation.result = handle_for(candidate);
+            resolve_cache.insert_or_assign(operation.entity_id,
+                ResolveCacheEntry{epoch, now_ms, operation.result});
+            resolve_scans.erase(scan);
+            return;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            ++progress.cursor;
+            break;
+        }
+    }
+    if (progress.cursor >= progress.pointers.size()) {
+        resolve_cache.insert_or_assign(operation.entity_id, ResolveCacheEntry{epoch, now_ms, 0});
+        resolve_scans.erase(scan);
+    }
 }
 
 struct ReadOperation {
@@ -364,6 +490,10 @@ void Shutdown() {
     layout_ready = false;
     handles.clear();
     reverse_handles.clear();
+    query_scans.clear();
+    query_cache.clear();
+    resolve_scans.clear();
+    resolve_cache.clear();
 }
 }
 
@@ -391,6 +521,10 @@ extern "C" bool __cdecl ShroudforgeEcsConfigure(const char* const* names,
     layout_ready = false;
     handles.clear();
     reverse_handles.clear();
+    query_scans.clear();
+    query_cache.clear();
+    resolve_scans.clear();
+    resolve_cache.clear();
     return true;
 }
 
@@ -423,7 +557,7 @@ extern "C" std::size_t __cdecl ShroudforgeEcsQuery(const char* const* names, std
     operation->entities = operation->output.data();
     operation->capacity = capacity;
     if (!GameThreadDispatcher::Invoke(query_on_game_thread, operation)) return SIZE_MAX;
-    if (operation->result == SIZE_MAX) return SIZE_MAX;
+    if (operation->result >= SIZE_MAX - 1) return operation->result;
     if (entities) std::copy_n(operation->output.begin(), (std::min)(capacity, operation->result), entities);
     return operation->result;
 }

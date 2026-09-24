@@ -1,8 +1,8 @@
 #include "profile.h"
 #include "logging_config.h"
+#include "embedded_compatibility_profile_ids.h"
 #include <windows.h>
 #include <filesystem>
-#include <fstream>
 #include <unordered_set>
 #include "../../third_party/nlohmann/json.hpp"
 
@@ -12,21 +12,25 @@ bool Load() {
         HMODULE self{};
         if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
             reinterpret_cast<LPCWSTR>(&Load), &self)) return false;
-        wchar_t module_path[32768]{}, process_path[32768]{};
-        if (!GetModuleFileNameW(self, module_path, 32768) || !GetModuleFileNameW(nullptr, process_path, 32768)) return false;
-        const auto root = std::filesystem::path(module_path).parent_path();
+        wchar_t process_path[32768]{};
+        if (!GetModuleFileNameW(nullptr, process_path, 32768)) return false;
         const auto process = std::filesystem::path(process_path).filename().string();
         const auto base = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
         const auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
         if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
         const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
         if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return false;
-        const auto directory = root / "runtime/compatibility/profiles";
         nlohmann::json exact_profile, fallback_profile;
         unsigned exact_count{}, fallback_count{};
-        for (const auto& entry : std::filesystem::directory_iterator(directory)) {
-            if (entry.path().extension() != ".json") continue;
-            auto candidate = nlohmann::json::parse(std::ifstream(entry.path()));
+        for (const auto resource_id : ShroudforgeEmbeddedProfiles::resource_ids) {
+            const auto resource = FindResourceW(self, MAKEINTRESOURCEW(resource_id), MAKEINTRESOURCEW(10));
+            if (!resource) throw std::runtime_error("embedded compatibility profile is missing");
+            const auto loaded = LoadResource(self, resource);
+            if (!loaded) throw std::runtime_error("embedded compatibility profile could not be loaded");
+            const auto size = SizeofResource(self, resource);
+            const auto* data = static_cast<const char*>(LockResource(loaded));
+            if (!data || !size) throw std::runtime_error("embedded compatibility profile is empty");
+            auto candidate = nlohmann::json::parse(data, data + size);
             if (candidate.at("schemaVersion") != 1 || candidate.at("target") != process) continue;
             const bool matches = candidate.at("image").at("timestamp") == nt->FileHeader.TimeDateStamp &&
                 candidate.at("image").at("size") == nt->OptionalHeader.SizeOfImage;

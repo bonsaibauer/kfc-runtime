@@ -6,13 +6,13 @@ Build with `cmake -S . -B build -A x64` and
 `cmake --build build --config Release`. Install using
 `cmake --install build --config Release --prefix <staging-directory>`.
 
-The DLL belongs next to the game executable. Runtime profiles are read from
-`runtime/compatibility/profiles/` and shipped there by the release build.
+The DLL belongs next to the game executable. Compatibility profiles from
+`compatibility/profiles/` are embedded into the DLL during the CMake build.
 Provider ABI 1 exports `KfcRuntimeAbi`, Initialize/Tick/Shutdown/Status and the
 `ShroudforgeEcs*` component interface. Existing consumers must check ABI 1
-before resolving operations. JSON profiles can change without rebuilding the
-loader. Changes to native behavior require a new runtime DLL; incompatible
-provider ABI changes also require a host update.
+before resolving operations. A profile change requires rebuilding the runtime
+DLL. Changes to native behavior require a new runtime DLL; incompatible provider
+ABI changes also require a host update.
 
 Profiles are selected for the running process by executable name and PE image
 timestamp and size. A unique exact image match always takes priority. If there
