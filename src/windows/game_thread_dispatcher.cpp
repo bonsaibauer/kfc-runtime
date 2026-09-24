@@ -354,7 +354,15 @@ std::string Status() {
     const auto thread = engine_thread.load(std::memory_order_acquire);
     if (!thread || !Ready()) {
         const auto drain = last_drain_ms.load(std::memory_order_acquire);
-        if (drain && GetTickCount64() - drain > 500) return "stale-game-thread";
+        if (drain && GetTickCount64() - drain > 500) {
+            std::size_t queued{};
+            { std::scoped_lock lock(queue_mutex); queued = queue.size(); }
+            return "stale-game-thread(thread=" + std::to_string(thread) +
+                ",drain=over-500ms,queued=" + std::to_string(queued) +
+                ",completed=" + std::to_string(completed_count.load(std::memory_order_acquire)) +
+                ",timeouts=" + std::to_string(timeout_count.load(std::memory_order_acquire)) +
+                ",rejected=" + std::to_string(rejected_count.load(std::memory_order_acquire)) + ')';
+        }
         return "installed-awaiting-world";
     }
     const auto manager = entity_manager.load(std::memory_order_acquire);
