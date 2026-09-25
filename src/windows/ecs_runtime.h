@@ -32,6 +32,6 @@ KFC_EXPORT std::uint32_t __cdecl ShroudforgeEcsResolve(std::uint32_t entity_id);
 KFC_EXPORT bool __cdecl ShroudforgeEcsRead(
     std::uint32_t entity, const char* qualified_name, void* value, std::size_t size);
 KFC_EXPORT bool __cdecl ShroudforgeEcsWrite(
-    std::uint32_t entity, const char* qualified_name, const void* expected,
+    std::uint32_t entity, const char* qualified_name, const void* mask,
     const void* value, std::size_t size);
 }

@@ -305,6 +305,9 @@ bool Initialize() {
     std::size_t image_size{};
     if (!supported_image(base, image_size)) return false;
     hooks.clear();
+    // Drain on the actor-world update entry, which continues while the local
+    // actor is active. The prop-system callback is event-driven and can stop
+    // being called for long stretches, leaving queued ECS work permanently stale.
     if (!install_hook(base, ShroudforgeCompatibility::EnshroudedClient::game_thread_signature,
             ShroudforgeCompatibility::EnshroudedClient::game_thread_original.data(),
             ShroudforgeCompatibility::EnshroudedClient::game_thread_original.size(),

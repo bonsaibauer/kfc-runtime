@@ -20,6 +20,15 @@
 namespace {
 constexpr std::size_t max_components = 1024;
 
+struct OperationCounters {
+    std::atomic<std::uint64_t> queries{}, query_successes{}, query_incomplete{}, query_failures{};
+    std::atomic<std::uint64_t> resolves{}, resolve_successes{}, resolve_failures{};
+    std::atomic<std::uint64_t> reads{}, read_successes{}, read_failures{};
+    std::atomic<std::uint64_t> writes{}, write_successes{}, write_failures{};
+};
+OperationCounters operation_counters;
+std::atomic<std::uint64_t> active_query_cursor{}, active_query_total{}, active_query_matches{};
+
 struct ComponentType { std::uint16_t index; std::uint32_t size; };
 struct ResolvedLayout {
     std::uintptr_t count_address{};
@@ -98,10 +107,24 @@ bool readable(std::uintptr_t address, std::size_t size) {
         address + size <= end;
 }
 
+// Runtime reads originate from the live ECS entity table in this process.
+// ReadProcessMemory plus VirtualQuery for every scalar made the incremental
+// scan advance only one or two entities per game-thread callback. Keep the
+// same fault containment, but copy directly under SEH; callers still validate
+// externally supplied ranges where required and invalid/stale pointers fail
+// closed on an access violation.
+bool guarded_copy(void* destination, const void* source, std::size_t size) {
+    __try {
+        std::memcpy(destination, source, size);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool read_bytes(std::uintptr_t address, void* value, std::size_t size) {
-    SIZE_T received{};
-    return readable(address, size) && ReadProcessMemory(GetCurrentProcess(),
-        reinterpret_cast<const void*>(address), value, size, &received) && received == size;
+    return address && value && size && address <= UINTPTR_MAX - size &&
+        guarded_copy(value, reinterpret_cast<const void*>(address), size);
 }
 template<class T> bool read(std::uintptr_t address, T& value) {
     return read_bytes(address, &value, sizeof(value));
@@ -250,6 +273,9 @@ void query_on_game_thread(void* opaque) {
         fresh.touched_ms = now_ms;
         if (!entity_pointers(layout, fresh.pointers)) return;
         scan = query_scans.insert_or_assign(key, std::move(fresh)).first;
+        active_query_cursor.store(0, std::memory_order_relaxed);
+        active_query_total.store(scan->second.pointers.size(), std::memory_order_relaxed);
+        active_query_matches.store(0, std::memory_order_relaxed);
     }
     auto& progress = scan->second;
     progress.touched_ms = now_ms;
@@ -276,8 +302,14 @@ void query_on_game_thread(void* opaque) {
         // distinct sentinel keeps an incomplete scan from looking like an
         // authoritative empty query result.
         operation.result = SIZE_MAX - 1;
+        active_query_cursor.store(progress.cursor, std::memory_order_relaxed);
+        active_query_total.store(progress.pointers.size(), std::memory_order_relaxed);
+        active_query_matches.store(progress.matches.size(), std::memory_order_relaxed);
         return;
     }
+    active_query_cursor.store(progress.cursor, std::memory_order_relaxed);
+    active_query_total.store(progress.pointers.size(), std::memory_order_relaxed);
+    active_query_matches.store(progress.matches.size(), std::memory_order_relaxed);
     auto completed = std::move(progress.matches);
     query_scans.erase(scan);
     auto [cached, _] = query_cache.insert_or_assign(key, QueryCacheEntry{epoch, now_ms, std::move(completed)});
@@ -364,12 +396,12 @@ void read_on_game_thread(void* opaque) {
 struct WriteOperation {
     std::uint32_t handle{};
     const char* name{};
-    const void* expected{};
+    const void* mask{};
     const void* value{};
     std::size_t size{};
     bool result{};
     std::string owned_name;
-    std::vector<std::uint8_t> source, destination;
+    std::vector<std::uint8_t> mask_bytes, destination;
 };
 void write_on_game_thread(void* opaque) {
     if (stop_requested.load(std::memory_order_acquire)) return;
@@ -378,20 +410,26 @@ void write_on_game_thread(void* opaque) {
     ResolvedLayout layout{};
     EntityView entity{};
     std::uintptr_t address{};
-    if (!operation.expected || !operation.value || !resolve_component(operation.name, component) ||
+    if (!operation.mask || !operation.value || !resolve_component(operation.name, component) ||
         component.size != operation.size || !layout_snapshot(layout) ||
         !entity_for_handle(operation.handle, layout, entity) ||
         !component_address(entity, layout, component, address)) return;
     std::scoped_lock transaction(write_mutex);
     if (stop_requested.load(std::memory_order_acquire)) return;
     std::vector<std::uint8_t> before(operation.size), verified(operation.size);
-    if (!read_bytes(address, before.data(), operation.size) ||
-        std::memcmp(before.data(), operation.expected, operation.size)) return;
+    if (!read_bytes(address, before.data(), operation.size)) return;
+    auto merged = before;
+    const auto* mask = static_cast<const std::uint8_t*>(operation.mask);
+    const auto* value = static_cast<const std::uint8_t*>(operation.value);
+    for (std::size_t index = 0; index < operation.size; ++index) {
+        if (mask[index]) merged[index] = value[index];
+    }
+    if (merged == before) { operation.result = true; return; }
     SIZE_T written{};
-    if (!WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(address), operation.value,
+    if (!WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(address), merged.data(),
             operation.size, &written) || written != operation.size ||
         !read_bytes(address, verified.data(), operation.size) ||
-        std::memcmp(verified.data(), operation.value, operation.size)) {
+        std::memcmp(verified.data(), merged.data(), operation.size)) {
         SIZE_T restored{};
         WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(address), before.data(),
             operation.size, &restored);
@@ -477,6 +515,26 @@ std::string Diagnostics() {
         {"profile",ShroudforgeCompatibility::EnshroudedClient::status},
         {"configuredTypes",configured_types.size()}, {"resolvedTypes",types.size()},
         {"layoutReady",layout_ready}, {"layoutEpoch",layout_epoch},
+        {"activeQueryScan",nlohmann::json{
+            {"cursor",active_query_cursor.load(std::memory_order_relaxed)},
+            {"total",active_query_total.load(std::memory_order_relaxed)},
+            {"matches",active_query_matches.load(std::memory_order_relaxed)}
+        }},
+        {"operations", nlohmann::json{
+            {"queries", operation_counters.queries.load()},
+            {"querySuccesses", operation_counters.query_successes.load()},
+            {"queryIncomplete", operation_counters.query_incomplete.load()},
+            {"queryFailures", operation_counters.query_failures.load()},
+            {"resolves", operation_counters.resolves.load()},
+            {"resolveSuccesses", operation_counters.resolve_successes.load()},
+            {"resolveFailures", operation_counters.resolve_failures.load()},
+            {"reads", operation_counters.reads.load()},
+            {"readSuccesses", operation_counters.read_successes.load()},
+            {"readFailures", operation_counters.read_failures.load()},
+            {"writes", operation_counters.writes.load()},
+            {"writeSuccesses", operation_counters.write_successes.load()},
+            {"writeFailures", operation_counters.write_failures.load()}
+        }},
         {"dispatcher",nlohmann::json::parse(GameThreadDispatcher::Diagnostics())}
     }).dump();
 }
@@ -544,10 +602,17 @@ extern "C" bool __cdecl ShroudforgeEcsDescribe(const char* name, std::uint32_t* 
 }
 extern "C" std::size_t __cdecl ShroudforgeEcsQuery(const char* const* names, std::size_t count,
                                                     std::uint32_t* entities, std::size_t capacity) {
-    if (!names || !count || count > max_components || capacity > (1u << 20) || !ShroudforgeEcsReady()) return SIZE_MAX;
+    operation_counters.queries.fetch_add(1, std::memory_order_relaxed);
+    if (!names || !count || count > max_components || capacity > (1u << 20) || !ShroudforgeEcsReady()) {
+        operation_counters.query_failures.fetch_add(1, std::memory_order_relaxed);
+        return SIZE_MAX;
+    }
     auto operation = std::make_shared<QueryOperation>();
     for (std::size_t index = 0; index < count; ++index) {
-        if (!names[index]) return SIZE_MAX;
+        if (!names[index]) {
+            operation_counters.query_failures.fetch_add(1, std::memory_order_relaxed);
+            return SIZE_MAX;
+        }
         operation->owned_names.emplace_back(names[index]);
     }
     for (const auto& name : operation->owned_names) operation->name_pointers.push_back(name.c_str());
@@ -556,20 +621,42 @@ extern "C" std::size_t __cdecl ShroudforgeEcsQuery(const char* const* names, std
     operation->output.resize(capacity);
     operation->entities = operation->output.data();
     operation->capacity = capacity;
-    if (!GameThreadDispatcher::Invoke(query_on_game_thread, operation)) return SIZE_MAX;
-    if (operation->result >= SIZE_MAX - 1) return operation->result;
+    if (!GameThreadDispatcher::Invoke(query_on_game_thread, operation)) {
+        operation_counters.query_failures.fetch_add(1, std::memory_order_relaxed);
+        return SIZE_MAX;
+    }
+    if (operation->result >= SIZE_MAX - 1) {
+        if (operation->result == SIZE_MAX - 1) operation_counters.query_incomplete.fetch_add(1, std::memory_order_relaxed);
+        else operation_counters.query_failures.fetch_add(1, std::memory_order_relaxed);
+        return operation->result;
+    }
     if (entities) std::copy_n(operation->output.begin(), (std::min)(capacity, operation->result), entities);
+    operation_counters.query_successes.fetch_add(1, std::memory_order_relaxed);
     return operation->result;
 }
 extern "C" std::uint32_t __cdecl ShroudforgeEcsResolve(std::uint32_t entity_id) {
-    if (!entity_id || !ShroudforgeEcsReady()) return 0;
+    operation_counters.resolves.fetch_add(1, std::memory_order_relaxed);
+    if (!entity_id || !ShroudforgeEcsReady()) {
+        operation_counters.resolve_failures.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+    }
     auto operation = std::make_shared<ResolveOperation>();
     operation->entity_id = entity_id;
-    return GameThreadDispatcher::Invoke(resolve_on_game_thread, operation) ? operation->result : 0;
+    if (!GameThreadDispatcher::Invoke(resolve_on_game_thread, operation)) {
+        operation_counters.resolve_failures.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+    }
+    if (operation->result) operation_counters.resolve_successes.fetch_add(1, std::memory_order_relaxed);
+    else operation_counters.resolve_failures.fetch_add(1, std::memory_order_relaxed);
+    return operation->result;
 }
 extern "C" bool __cdecl ShroudforgeEcsRead(std::uint32_t handle, const char* name,
                                            void* value, std::size_t size) {
-    if (!name || !value || !size || size > (1u << 20) || !ShroudforgeEcsReady()) return false;
+    operation_counters.reads.fetch_add(1, std::memory_order_relaxed);
+    if (!name || !value || !size || size > (1u << 20) || !ShroudforgeEcsReady()) {
+        operation_counters.read_failures.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
     auto operation = std::make_shared<ReadOperation>();
     operation->handle = handle;
     operation->owned_name = name;
@@ -577,24 +664,35 @@ extern "C" bool __cdecl ShroudforgeEcsRead(std::uint32_t handle, const char* nam
     operation->output.resize(size);
     operation->value = operation->output.data();
     operation->size = size;
-    if (!GameThreadDispatcher::Invoke(read_on_game_thread, operation) || !operation->result) return false;
+    if (!GameThreadDispatcher::Invoke(read_on_game_thread, operation) || !operation->result) {
+        operation_counters.read_failures.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
     std::memcpy(value, operation->output.data(), size);
+    operation_counters.read_successes.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 extern "C" bool __cdecl ShroudforgeEcsWrite(std::uint32_t handle, const char* name,
-                                            const void* expected, const void* value,
+                                            const void* mask, const void* value,
                                             std::size_t size) {
-    if (!name || !expected || !value || !size || size > (1u << 20) || !ShroudforgeEcsCanWrite()) return false;
+    operation_counters.writes.fetch_add(1, std::memory_order_relaxed);
+    if (!name || !mask || !value || !size || size > (1u << 20) || !ShroudforgeEcsCanWrite()) {
+        operation_counters.write_failures.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
     auto operation = std::make_shared<WriteOperation>();
     operation->handle = handle;
     operation->owned_name = name;
     operation->name = operation->owned_name.c_str();
-    const auto first = static_cast<const std::uint8_t*>(expected);
+    const auto first = static_cast<const std::uint8_t*>(mask);
     const auto last = static_cast<const std::uint8_t*>(value);
-    operation->source.assign(first, first + size);
+    operation->mask_bytes.assign(first, first + size);
     operation->destination.assign(last, last + size);
-    operation->expected = operation->source.data();
+    operation->mask = operation->mask_bytes.data();
     operation->value = operation->destination.data();
     operation->size = size;
-    return GameThreadDispatcher::Invoke(write_on_game_thread, operation) && operation->result;
+    const bool written = GameThreadDispatcher::Invoke(write_on_game_thread, operation) && operation->result;
+    if (written) operation_counters.write_successes.fetch_add(1, std::memory_order_relaxed);
+    else operation_counters.write_failures.fetch_add(1, std::memory_order_relaxed);
+    return written;
 }
