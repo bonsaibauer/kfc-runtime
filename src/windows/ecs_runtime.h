@@ -34,4 +34,6 @@ KFC_EXPORT bool __cdecl ShroudforgeEcsRead(
 KFC_EXPORT bool __cdecl ShroudforgeEcsWrite(
     std::uint32_t entity, const char* qualified_name, const void* mask,
     const void* value, std::size_t size);
+KFC_EXPORT bool __cdecl ShroudforgeRuntimePatchAvailable(const char* name);
+KFC_EXPORT bool __cdecl ShroudforgeRuntimePatchSetEnabled(const char* name, bool enabled, std::uint32_t* outcome);
 }

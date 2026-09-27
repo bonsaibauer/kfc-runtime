@@ -2,6 +2,8 @@
 #include "game_thread_dispatcher.h"
 #include "../../third_party/nlohmann/json.hpp"
 #include "profile.h"
+#include "world_runtime.h"
+#include "patch_runtime.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -15,6 +17,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -60,6 +63,17 @@ struct HandleRecord {
 std::mutex state_mutex;
 std::unordered_map<std::string, ComponentType> types;
 std::unordered_map<std::string, std::uint32_t> configured_types;
+std::unordered_map<std::uint32_t, std::unordered_set<std::uint16_t>> observed_indices_by_size;
+std::unordered_set<std::uintptr_t> discovered_layouts;
+std::vector<std::uintptr_t> discovery_entities;
+std::size_t discovery_cursor{};
+std::uintptr_t discovery_table{};
+std::uint64_t discovery_last_restart{};
+std::uint64_t discovery_scanned_entities{};
+std::uint64_t discovery_layout_count{};
+std::uint64_t discovery_restarts{};
+bool discovery_complete{};
+std::mutex discovery_mutex;
 ResolvedLayout live_layout{};
 bool layout_ready{};
 std::uintptr_t live_table{};
@@ -437,6 +451,116 @@ void write_on_game_thread(void* opaque) {
     }
     operation.result = true;
 }
+
+void reset_component_discovery() {
+    std::scoped_lock lock(discovery_mutex);
+    observed_indices_by_size.clear();
+    discovered_layouts.clear();
+    discovery_entities.clear();
+    discovery_cursor = 0;
+    discovery_table = 0;
+    discovery_last_restart = 0;
+    discovery_scanned_entities = 0;
+    discovery_layout_count = 0;
+    discovery_restarts = 0;
+    discovery_complete = false;
+}
+
+void collect_layout_component_candidates(const EntityView& entity, const ResolvedLayout& layout) {
+    std::uint64_t component_bits[16]{};
+    if (!read_bytes(entity.layout + layout.component_bits, component_bits, sizeof(component_bits))) return;
+    for (std::size_t index = 0; index < max_components; ++index) {
+        if (!(component_bits[index / 64] & (std::uint64_t{1} << (index % 64)))) continue;
+        std::uint16_t stride{};
+        if (!read(entity.layout + layout.component_strides + index * sizeof(stride), stride) || !stride) continue;
+        observed_indices_by_size[stride].insert(static_cast<std::uint16_t>(index));
+    }
+    ++discovery_layout_count;
+}
+
+void publish_discovered_component_indices() {
+    std::unordered_map<std::string, std::uint32_t> contract;
+    std::unordered_map<std::string, ComponentType> previously_resolved;
+    {
+        std::scoped_lock lock(state_mutex);
+        contract = configured_types;
+        previously_resolved = types;
+    }
+    std::unordered_map<std::uint32_t, std::vector<std::string>> names_by_size;
+    for (const auto& [name, size] : contract) names_by_size[size].push_back(name);
+    std::unordered_map<std::string, ComponentType> discovered;
+    for (const auto& component : ShroudforgeCompatibility::EnshroudedClient::runtime_components) {
+        const auto known = contract.find(component.qualified_name);
+        if (known != contract.end() && known->second == component.size)
+            discovered.emplace(known->first, ComponentType{component.index, component.size});
+    }
+    for (const auto& [name, component] : previously_resolved) {
+        const auto configured = contract.find(name);
+        if (configured != contract.end() && configured->second == component.size)
+            discovered.emplace(name, component);
+    }
+    for (const auto& [size, names] : names_by_size) {
+        // Size can identify a component only when this build's reflected
+        // component catalog contains exactly one component of that size.
+        if (names.size() != 1) continue;
+        const auto candidates = observed_indices_by_size.find(size);
+        if (candidates == observed_indices_by_size.end() || candidates->second.size() != 1) continue;
+        const auto index = *candidates->second.begin();
+        const auto occupied = std::find_if(discovered.begin(), discovered.end(), [index](const auto& entry) {
+            return entry.second.index == index;
+        });
+        if (occupied == discovered.end()) discovered.emplace(names.front(), ComponentType{index, size});
+    }
+    std::scoped_lock lock(state_mutex);
+    if (configured_types != contract) return;
+    types = std::move(discovered);
+}
+
+void component_discovery_tick(std::uintptr_t manager) {
+    std::scoped_lock discovery_lock(discovery_mutex);
+    ResolvedLayout layout{};
+    if (!layout_snapshot(layout)) return;
+    const auto count_address = manager + ShroudforgeCompatibility::EnshroudedClient::entity_manager_count;
+    const auto table_address = manager + ShroudforgeCompatibility::EnshroudedClient::entity_manager_table;
+    std::uint64_t count{};
+    std::uintptr_t table{};
+    if (!read(count_address, count) || !count || count > (1u << 20) ||
+        !read(table_address, table) || !table || !readable(table, count * sizeof(std::uintptr_t))) return;
+
+    const auto now = GetTickCount64();
+    if (table != discovery_table || discovery_entities.size() != count ||
+        (discovery_complete && now - discovery_last_restart >= 5000)) {
+        discovery_entities.resize(static_cast<std::size_t>(count));
+        if (!read_bytes(table, discovery_entities.data(), discovery_entities.size() * sizeof(std::uintptr_t))) {
+            discovery_entities.clear();
+            return;
+        }
+        discovery_table = table;
+        discovery_cursor %= static_cast<std::size_t>(count);
+        discovery_last_restart = now;
+        discovery_scanned_entities = 0;
+        ++discovery_restarts;
+        discovery_complete = false;
+    }
+    if (discovery_complete || discovery_entities.empty()) return;
+
+    constexpr std::size_t entities_per_tick = 128;
+    const auto begin = discovery_cursor;
+    const auto end = (std::min)(discovery_cursor + entities_per_tick, discovery_entities.size());
+    for (; discovery_cursor < end; ++discovery_cursor) {
+        EntityView entity{};
+        if (!entity_view(discovery_entities[discovery_cursor], layout, entity) ||
+            !discovered_layouts.insert(entity.layout).second) continue;
+        collect_layout_component_candidates(entity, layout);
+    }
+    discovery_scanned_entities += end - begin;
+    if (discovery_cursor >= discovery_entities.size()) {
+        discovery_complete = true;
+    }
+    // Publish every batch so a changing entity table cannot withhold mappings
+    // until an entire snapshot has been traversed.
+    publish_discovered_component_indices();
+}
 }
 
 namespace EcsRuntime {
@@ -454,13 +578,13 @@ bool Initialize() {
 void Tick() {
     const auto manager = GameThreadDispatcher::EntityManager();
     if (!manager) return;
-    std::scoped_lock lock(state_mutex);
     const auto count_address = manager + ShroudforgeCompatibility::EnshroudedClient::entity_manager_count;
     const auto table_address = manager + ShroudforgeCompatibility::EnshroudedClient::entity_manager_table;
     std::uint64_t count{};
     std::uintptr_t table{};
     if (!read(count_address, count) || !count || count > (1u << 20) ||
         !read(table_address, table) || !readable(table, sizeof(std::uintptr_t))) {
+        std::scoped_lock lock(state_mutex);
         if (layout_ready) {
             layout_ready = false;
             ++layout_epoch;
@@ -469,31 +593,51 @@ void Tick() {
         }
         return;
     }
-    if (layout_ready && live_table == table && live_layout.count_address == count_address &&
-        live_layout.table_address == table_address) return;
-    live_layout = {};
-    live_table = table;
-    live_layout.count_address = count_address;
-    live_layout.table_address = table_address;
-    live_layout.entity_id = ShroudforgeCompatibility::EnshroudedClient::entity_id;
-    live_layout.entity_generation = ShroudforgeCompatibility::EnshroudedClient::entity_generation;
-    live_layout.entity_layout = ShroudforgeCompatibility::EnshroudedClient::entity_layout;
-    live_layout.entity_storage = ShroudforgeCompatibility::EnshroudedClient::entity_storage;
-    live_layout.entity_row = ShroudforgeCompatibility::EnshroudedClient::entity_row;
-    live_layout.component_bits = ShroudforgeCompatibility::EnshroudedClient::component_bits;
-    live_layout.component_offsets = ShroudforgeCompatibility::EnshroudedClient::component_offsets;
-    live_layout.component_strides = ShroudforgeCompatibility::EnshroudedClient::component_strides;
-    layout_ready = true;
-    ++layout_epoch;
-    handles.clear();
-    reverse_handles.clear();
+    {
+        std::scoped_lock lock(state_mutex);
+        if (!layout_ready || live_table != table || live_layout.count_address != count_address ||
+            live_layout.table_address != table_address) {
+            live_layout = {};
+            live_table = table;
+            live_layout.count_address = count_address;
+            live_layout.table_address = table_address;
+            live_layout.entity_id = ShroudforgeCompatibility::EnshroudedClient::entity_id;
+            live_layout.entity_generation = ShroudforgeCompatibility::EnshroudedClient::entity_generation;
+            live_layout.entity_layout = ShroudforgeCompatibility::EnshroudedClient::entity_layout;
+            live_layout.entity_storage = ShroudforgeCompatibility::EnshroudedClient::entity_storage;
+            live_layout.entity_row = ShroudforgeCompatibility::EnshroudedClient::entity_row;
+            live_layout.component_bits = ShroudforgeCompatibility::EnshroudedClient::component_bits;
+            live_layout.component_offsets = ShroudforgeCompatibility::EnshroudedClient::component_offsets;
+            live_layout.component_strides = ShroudforgeCompatibility::EnshroudedClient::component_strides;
+            layout_ready = true;
+            ++layout_epoch;
+            handles.clear();
+            reverse_handles.clear();
+        }
+    }
+    component_discovery_tick(manager);
 }
 std::string Status() {
+    std::scoped_lock discovery_lock(discovery_mutex);
     std::scoped_lock lock(state_mutex);
+    std::size_t dynamic_candidates{};
+    for (const auto& [name, size] : configured_types) {
+        (void)size;
+        if (name.starts_with("keen::ecs::Dynamic")) ++dynamic_candidates;
+    }
+    const auto component_candidates = configured_types.size() - dynamic_candidates;
     std::ostringstream text;
     text << "types=" << types.size() << '/' << configured_types.size()
+         << "{component=" << component_candidates << ",dynamic=" << dynamic_candidates << '}'
+         << " component_index_discovery=" << (discovery_complete ? "complete" : "scanning")
+         << '(' << discovery_cursor << '/' << discovery_entities.size()
+         << ",layouts=" << discovered_layouts.size()
+         << ",restarts=" << discovery_restarts << ')'
          << " profile=" << ShroudforgeCompatibility::EnshroudedClient::status
          << " game_thread=" << GameThreadDispatcher::Status();
+    for (const auto& operation : ShroudforgeCompatibility::EnshroudedClient::runtime_operations)
+        text << " world{" << operation.name << '=' << (operation.available ? operation.status : "unavailable") << '}';
+    text << " voxel_context=" << (WorldRuntime::ActiveContextAvailable() ? "ready" : "waiting");
     if (types.empty()) return text.str() + " registry=unresolved layout=unavailable";
     if (!layout_ready) return text.str() + " registry=ready layout=discovering";
     text << " layout=ready"
@@ -509,12 +653,75 @@ std::string Status() {
     return text.str();
 }
 std::string Diagnostics() {
+    std::scoped_lock discovery_lock(discovery_mutex);
     std::scoped_lock lock(state_mutex);
+    std::size_t observed_indices{};
+    for (const auto& entry : observed_indices_by_size) observed_indices += entry.second.size();
+    nlohmann::json resolved_mappings = nlohmann::json::array();
+    nlohmann::json unresolved_types = nlohmann::json::array();
+    nlohmann::json stride_candidates = nlohmann::json::array();
+    nlohmann::json world_operations = nlohmann::json::object();
+    for (const auto& operation : ShroudforgeCompatibility::EnshroudedClient::runtime_operations)
+        world_operations[operation.name] = {{"available", operation.available}, {"status", operation.status},
+            {"abi", operation.abi}, {"thread", operation.thread}, {"context", operation.context}};
+    std::unordered_map<std::uint32_t, std::vector<std::string>> names_by_size;
+    std::unordered_set<std::string> profile_names;
+    std::size_t dynamic_candidates{};
+    for (const auto& component : ShroudforgeCompatibility::EnshroudedClient::runtime_components)
+        profile_names.insert(component.qualified_name);
+    for (const auto& [name, size] : configured_types) {
+        names_by_size[size].push_back(name);
+        if (name.starts_with("keen::ecs::Dynamic")) ++dynamic_candidates;
+    }
+    for (const auto& [name, component] : types) {
+        resolved_mappings.push_back({{"name",name},{"index",component.index},{"size",component.size},
+            {"source",profile_names.contains(name) ? "exact-build-profile" : "unique-live-stride"}});
+    }
+    for (const auto& [size, names] : names_by_size) {
+        const auto candidate_set = observed_indices_by_size.find(size);
+        nlohmann::json indices = nlohmann::json::array();
+        if (candidate_set != observed_indices_by_size.end())
+            for (const auto index : candidate_set->second) indices.push_back(index);
+        stride_candidates.push_back({{"size",size},{"indices",std::move(indices)},
+            {"reflectedTypeCount",names.size()}});
+        for (const auto& name : names) {
+            if (types.contains(name)) continue;
+            const auto candidates = candidate_set == observed_indices_by_size.end() ? 0 : candidate_set->second.size();
+            const auto reason = names.size() != 1 ? "shared-reflected-size" :
+                candidates == 0 ? "no-live-archetype-observed" :
+                candidates != 1 ? "multiple-live-indices-for-size" : "index-conflict";
+            unresolved_types.push_back({{"name",name},{"size",size},{"reason",reason}});
+        }
+    }
     return nlohmann::json({
-        {"schemaVersion",1}, {"providerAbi",1},
+        {"schemaVersion",1}, {"providerAbi",4},
         {"profile",ShroudforgeCompatibility::EnshroudedClient::status},
+        {"candidateTypeBreakdown",nlohmann::json{
+            {"total",configured_types.size()},
+            {"componentTypes",configured_types.size() - dynamic_candidates},
+            {"dynamicRuntimeStructs",dynamic_candidates},
+            {"resolved",types.size()},
+            {"unresolved",configured_types.size() - types.size()}
+        }},
+        {"worldOperations",std::move(world_operations)},
+        {"voxelContextActive",WorldRuntime::ActiveContextAvailable()},
+        {"entityContextReady",WorldRuntime::EntityContextReady()},
         {"configuredTypes",configured_types.size()}, {"resolvedTypes",types.size()},
         {"layoutReady",layout_ready}, {"layoutEpoch",layout_epoch},
+        {"componentDiscovery",nlohmann::json{
+            {"complete",discovery_complete},
+            {"scannedEntities",discovery_scanned_entities},
+            {"totalEntities",discovery_entities.size()},
+            {"archetypes",discovery_layout_count},
+            {"distinctLayoutsSeen",discovered_layouts.size()},
+            {"snapshotRestarts",discovery_restarts},
+            {"observedStrideBuckets",observed_indices_by_size.size()},
+            {"observedIndexCandidates",observed_indices},
+            {"mappingMethod","exact profile entries plus unique reflected size and unique live archetype stride"},
+            {"resolved",std::move(resolved_mappings)},
+            {"unresolved",std::move(unresolved_types)},
+            {"strideCandidates",std::move(stride_candidates)}
+        }},
         {"activeQueryScan",nlohmann::json{
             {"cursor",active_query_cursor.load(std::memory_order_relaxed)},
             {"total",active_query_total.load(std::memory_order_relaxed)},
@@ -533,7 +740,8 @@ std::string Diagnostics() {
             {"readFailures", operation_counters.read_failures.load()},
             {"writes", operation_counters.writes.load()},
             {"writeSuccesses", operation_counters.write_successes.load()},
-            {"writeFailures", operation_counters.write_failures.load()}
+            {"writeFailures", operation_counters.write_failures.load()},
+            {"runtimePatches", nlohmann::json::parse(PatchRuntime::Diagnostics())}
         }},
         {"dispatcher",nlohmann::json::parse(GameThreadDispatcher::Diagnostics())}
     }).dump();
@@ -541,6 +749,7 @@ std::string Diagnostics() {
 void Shutdown() {
     stop_requested.store(true, std::memory_order_release);
     GameThreadDispatcher::Shutdown();
+    reset_component_discovery();
     std::scoped_lock lock(state_mutex);
     types.clear();
     configured_types.clear();
@@ -566,23 +775,26 @@ extern "C" bool __cdecl ShroudforgeEcsConfigure(const char* const* names,
         if (!name.starts_with("keen::ecs::")) return false;
         contract.emplace(name, sizes[index]);
     }
-    std::scoped_lock lock(state_mutex);
-    if (configured_types == contract) return true;
-    configured_types = std::move(contract);
-    types.clear();
-    for (const auto& component : ShroudforgeCompatibility::EnshroudedClient::runtime_components) {
-        const auto configured = configured_types.find(std::string(component.qualified_name));
-        if (configured != configured_types.end() && configured->second == component.size)
-            types.emplace(configured->first, ComponentType{component.index, component.size});
+    {
+        std::scoped_lock lock(state_mutex);
+        if (configured_types == contract) return true;
+        configured_types = std::move(contract);
+        types.clear();
+        for (const auto& component : ShroudforgeCompatibility::EnshroudedClient::runtime_components) {
+            const auto configured = configured_types.find(std::string(component.qualified_name));
+            if (configured != configured_types.end() && configured->second == component.size)
+                types.emplace(configured->first, ComponentType{component.index, component.size});
+        }
+        live_layout = {};
+        layout_ready = false;
+        handles.clear();
+        reverse_handles.clear();
+        query_scans.clear();
+        query_cache.clear();
+        resolve_scans.clear();
+        resolve_cache.clear();
     }
-    live_layout = {};
-    layout_ready = false;
-    handles.clear();
-    reverse_handles.clear();
-    query_scans.clear();
-    query_cache.clear();
-    resolve_scans.clear();
-    resolve_cache.clear();
+    reset_component_discovery();
     return true;
 }
 
@@ -695,4 +907,11 @@ extern "C" bool __cdecl ShroudforgeEcsWrite(std::uint32_t handle, const char* na
     if (written) operation_counters.write_successes.fetch_add(1, std::memory_order_relaxed);
     else operation_counters.write_failures.fetch_add(1, std::memory_order_relaxed);
     return written;
+}
+extern "C" bool __cdecl ShroudforgeRuntimePatchAvailable(const char* name) {
+    if (name && std::strcmp(name, "runtime.gameplay.patch") == 0) return PatchRuntime::AnyAvailable();
+    return PatchRuntime::Available(name);
+}
+extern "C" bool __cdecl ShroudforgeRuntimePatchSetEnabled(const char* name, bool enabled, std::uint32_t* outcome) {
+    return PatchRuntime::SetEnabled(name, enabled, outcome);
 }

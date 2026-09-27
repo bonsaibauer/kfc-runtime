@@ -10,6 +10,7 @@
     "allowStructuralRevalidation",
     "layout",
     "hooks",
+    "worldContexts",
     "components"
   ],
   "properties": {
@@ -125,7 +126,9 @@
       "additionalProperties": false,
       "required": [
         "game_thread",
-        "entity_manager"
+        "entity_manager",
+        "world_prop_update",
+        "world_actor_placement"
       ],
       "properties": {
         "game_thread": {
@@ -174,6 +177,99 @@
                 "maximum": 255
               }
             }
+          }
+        },
+        "world_prop_update": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["signature", "original"],
+          "properties": {
+            "signature": { "type": "string", "minLength": 14 },
+            "original": { "type": "array", "minItems": 5, "maxItems": 32, "items": { "type": "integer", "minimum": 0, "maximum": 255 } }
+          }
+        },
+        "world_actor_placement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["signature", "original"],
+          "properties": {
+            "signature": { "type": "string", "minLength": 14 },
+            "original": { "type": "array", "minItems": 5, "maxItems": 32, "items": { "type": "integer", "minimum": 0, "maximum": 255 } }
+          }
+        }
+      }
+    },
+    "worldOperations": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^runtime\\.world\\.": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["abi", "thread", "context"],
+          "oneOf": [
+            { "required": ["functionRva"] },
+            { "required": ["globalRva"] }
+          ],
+          "properties": {
+            "functionRva": { "type": "integer", "minimum": 1 },
+            "globalRva": { "type": "integer", "minimum": 1 },
+            "guardRva": { "type": "integer", "minimum": 0 },
+            "validationOffset": { "type": "integer", "minimum": 1 },
+            "mode": { "type": "integer", "minimum": 0, "maximum": 255 },
+            "contextPointerOffset": { "type": "integer" },
+            "worldOffset": { "type": "integer" },
+            "eventIdRva": { "type": "integer", "minimum": 1 },
+            "guardBytes": {
+              "type": "array",
+              "maxItems": 64,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+            },
+            "abi": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "thread": { "const": "game" },
+            "context": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimePatches": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^runtime\\.patch\\.": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["signature", "kind", "overwriteBytes", "payload"],
+          "properties": {
+            "signature": { "type": "string", "minLength": 5, "maxLength": 256 },
+            "kind": { "enum": ["bytes", "detour"] },
+            "overwriteBytes": { "type": "integer", "minimum": 3, "maximum": 32 },
+            "payload": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
+            "returnRel32Offset": { "type": "integer", "minimum": 1, "maximum": 252 }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "worldContexts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entityPlacement"],
+      "properties": {
+        "entityPlacement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["actorFrameServiceViewOffset", "serviceViewWorldOffset", "placementContextOffset", "placeQueueOffset", "removeQueueOffset", "publishStateOffset", "publishCommandsOffset", "ownerOffset"],
+          "properties": {
+            "actorFrameServiceViewOffset": {"type": "integer", "minimum": 0, "maximum": 65536},
+            "serviceViewWorldOffset": {"type": "integer", "minimum": 0, "maximum": 65536},
+            "placementContextOffset": {"type": "integer", "minimum": 0, "maximum": 65536},
+            "placeQueueOffset": {"type": "integer", "minimum": 0, "maximum": 65536},
+            "removeQueueOffset": {"type": "integer", "minimum": 0, "maximum": 65536},
+            "publishStateOffset": {"type": "integer", "minimum": 0, "maximum": 65536},
+            "publishCommandsOffset": {"type": "integer", "minimum": 0, "maximum": 65536},
+            "ownerOffset": {"type": "integer", "minimum": 0, "maximum": 65536}
           }
         }
       }

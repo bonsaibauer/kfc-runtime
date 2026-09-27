@@ -75,6 +75,27 @@ bool Load() {
         entity_manager_original = hooks.at("entity_manager").at("original").get<std::vector<std::uint8_t>>();
         if (game_thread_original.size() < 5 || game_thread_original.size() > 32 ||
             entity_manager_original.size() < 5 || entity_manager_original.size() > 32) throw std::runtime_error("invalid hook length");
+        world_prop_update_signature = hooks.at("world_prop_update").at("signature").get<std::string>();
+        world_prop_update_original = hooks.at("world_prop_update").at("original").get<std::vector<std::uint8_t>>();
+        world_actor_placement_signature = hooks.at("world_actor_placement").at("signature").get<std::string>();
+        world_actor_placement_original = hooks.at("world_actor_placement").at("original").get<std::vector<std::uint8_t>>();
+        if (world_prop_update_original.size() < 5 || world_prop_update_original.size() > 32 ||
+            world_actor_placement_original.size() < 5 || world_actor_placement_original.size() > 32)
+            throw std::runtime_error("invalid world context hook length");
+        const auto& entity_context = selected.at("worldContexts").at("entityPlacement");
+        auto context_offset = [&](const char* key) {
+            const auto value = entity_context.at(key).get<std::size_t>();
+            if (value > 0x10000) throw std::runtime_error(std::string("world context offset out of range: ") + key);
+            return value;
+        };
+        world_context_layout.actor_frame_service_view = context_offset("actorFrameServiceViewOffset");
+        world_context_layout.service_view_world = context_offset("serviceViewWorldOffset");
+        world_context_layout.placement_context = context_offset("placementContextOffset");
+        world_context_layout.place_queue = context_offset("placeQueueOffset");
+        world_context_layout.remove_queue = context_offset("removeQueueOffset");
+        world_context_layout.publish_state = context_offset("publishStateOffset");
+        world_context_layout.publish_commands = context_offset("publishCommandsOffset");
+        world_context_layout.owner = context_offset("ownerOffset");
         runtime_components.clear();
         std::unordered_set<std::string> names;
         std::unordered_set<unsigned> indices;
@@ -84,9 +105,90 @@ bool Load() {
             const auto size = component.at("size").get<unsigned>();
             if (!name.starts_with("keen::ecs::") || index >= 1024 || !size || size > 65535 ||
                 !names.insert(name).second || !indices.insert(index).second) throw std::runtime_error("invalid component mapping");
-            runtime_components.push_back({name, static_cast<std::uint16_t>(index), size});
+            if (exact) runtime_components.push_back({name, static_cast<std::uint16_t>(index), size});
         }
-        if (runtime_components.empty()) throw std::runtime_error("empty component profile");
+        if (exact && runtime_components.empty()) throw std::runtime_error("empty component profile");
+        runtime_operations.clear();
+        runtime_patches.clear();
+        world_finish_event_id_rva = 0;
+        const auto operations = selected.find("worldOperations");
+        if (operations != selected.end()) {
+            std::unordered_set<std::string> operation_names;
+            for (auto item = operations->begin(); item != operations->end(); ++item) {
+                const auto& value = item.value();
+                RuntimeOperation operation{};
+                operation.name = item.key();
+                operation.function_rva = value.value("functionRva", std::uintptr_t{});
+                operation.global_rva = value.value("globalRva", std::uintptr_t{});
+                operation.guard_rva = value.value("guardRva", std::uintptr_t{});
+                operation.validation_offset = value.value("validationOffset", std::uintptr_t{});
+                operation.mode = value.value("mode", std::uint32_t{});
+                operation.context_pointer_offset = value.value("contextPointerOffset", std::ptrdiff_t{});
+                operation.world_offset = value.value("worldOffset", std::ptrdiff_t{});
+                if (operation.name == "runtime.world.entity.finish_building")
+                    world_finish_event_id_rva = value.value("eventIdRva", std::uintptr_t{});
+                operation.guard_bytes = value.value("guardBytes", std::vector<std::uint8_t>{});
+                operation.abi = value.at("abi").get<std::string>();
+                operation.thread = value.at("thread").get<std::string>();
+                operation.context = value.at("context").get<std::string>();
+                if (!operation.name.starts_with("runtime.world.") ||
+                    !operation_names.insert(operation.name).second ||
+                    operation.abi.empty() || operation.abi.size() > 256 ||
+                    operation.thread != "game" || operation.context.empty() || operation.context.size() > 256 ||
+                    (operation.function_rva == 0) == (operation.global_rva == 0) ||
+                    operation.guard_bytes.size() > 64)
+                    throw std::runtime_error("invalid world operation profile entry: " + operation.name);
+                if (operation.name == "runtime.world.context.active" &&
+                    (!operation.global_rva || !operation.context_pointer_offset || !operation.world_offset))
+                    throw std::runtime_error("active world context requires a validated pointer chain");
+
+                const auto selected_image_size = static_cast<std::size_t>(nt->OptionalHeader.SizeOfImage);
+                const bool target_in_image = operation.function_rva
+                    ? operation.function_rva < selected_image_size
+                    : operation.global_rva < selected_image_size;
+                const bool guard_in_image = operation.guard_bytes.empty() ||
+                    (operation.guard_rva < selected_image_size &&
+                     operation.guard_bytes.size() <= selected_image_size - operation.guard_rva);
+                const bool guard_matches = guard_in_image &&
+                    (operation.guard_bytes.empty() ||
+                     std::memcmp(base + operation.guard_rva, operation.guard_bytes.data(),
+                                 operation.guard_bytes.size()) == 0);
+                const bool event_id_valid = operation.name != "runtime.world.entity.finish_building" ||
+                    (world_finish_event_id_rva && world_finish_event_id_rva < selected_image_size &&
+                     sizeof(std::uint32_t) <= selected_image_size - world_finish_event_id_rva);
+                operation.available = exact && target_in_image && guard_matches && event_id_valid;
+                operation.status = !exact ? "requires-exact-image-build" :
+                    !target_in_image ? "target-outside-image" :
+                    !guard_in_image ? "guard-outside-image" :
+                    !guard_matches ? "instruction-guard-mismatch" :
+                    !event_id_valid ? "finish-event-id-outside-image" :
+                    operation.global_rva ? "runtime-pointer-validation-required" : "verified";
+                runtime_operations.push_back(std::move(operation));
+            }
+        }
+        const auto patches = selected.find("runtimePatches");
+        if (patches != selected.end()) {
+            std::unordered_set<std::string> patch_names;
+            for (auto item = patches->begin(); item != patches->end(); ++item) {
+                const auto& value = item.value();
+                RuntimePatch patch{};
+                patch.name = item.key();
+                patch.signature = value.at("signature").get<std::string>();
+                patch.kind = value.at("kind").get<std::string>();
+                patch.overwrite = value.at("overwriteBytes").get<std::size_t>();
+                patch.payload = value.at("payload").get<std::vector<std::uint8_t>>();
+                patch.return_rel32_offset = value.value("returnRel32Offset", std::size_t{});
+                if (!patch.name.starts_with("runtime.patch.") || !patch_names.insert(patch.name).second ||
+                    patch.signature.empty() || patch.signature.size() > 256 || patch.overwrite < 3 || patch.overwrite > 32 ||
+                    patch.payload.empty() || patch.payload.size() > 256 ||
+                    (patch.kind != "bytes" && patch.kind != "detour") ||
+                    (patch.kind == "bytes" && patch.payload.size() != patch.overwrite) ||
+                    (patch.kind == "detour" && (patch.return_rel32_offset < 1 || patch.return_rel32_offset + 4 > patch.payload.size() ||
+                        patch.payload[patch.return_rel32_offset - 1] != 0xe9)))
+                    throw std::runtime_error("invalid runtime patch profile entry: " + patch.name);
+                if (exact) runtime_patches.push_back(std::move(patch));
+            }
+        }
         status = selected.at("id").get<std::string>() + (exact ? ":exact-image" : ":structural-revalidation");
         return true;
     } catch (const std::exception& error) {

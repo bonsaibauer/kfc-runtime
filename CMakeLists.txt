@@ -33,7 +33,8 @@ set_source_files_properties("${profile_resource_rc}" PROPERTIES
 
 add_library(kfc-runtime SHARED
     src/windows/ecs_runtime.cpp src/windows/game_thread_dispatcher.cpp
-    src/windows/profile.cpp src/windows/provider.cpp "${profile_resource_rc}")
+    src/windows/profile.cpp src/windows/provider.cpp src/windows/world_runtime.cpp
+    src/windows/patch_runtime.cpp "${profile_resource_rc}")
 target_include_directories(kfc-runtime PRIVATE "${profile_resource_dir}")
 target_compile_features(kfc-runtime PRIVATE cxx_std_20)
 target_compile_definitions(kfc-runtime PRIVATE KFC_RUNTIME_BUILD WIN32_LEAN_AND_MEAN NOMINMAX)

@@ -1,6 +1,8 @@
 #include "game_thread_dispatcher.h"
 
 #include "profile.h"
+#include "world_runtime.h"
+#include "patch_runtime.h"
 #include "../../third_party/nlohmann/json.hpp"
 
 #include <windows.h>
@@ -31,6 +33,7 @@ struct Job {
 std::mutex queue_mutex;
 std::vector<std::shared_ptr<Job>> queue;
 std::atomic<bool> accepting{};
+std::atomic<bool> entity_context_hooks_ready{};
 std::atomic<std::uint32_t> engine_thread{};
 std::atomic<std::uintptr_t> entity_manager{};
 std::atomic<bool> command_observed{};
@@ -132,7 +135,7 @@ void* allocate_near(std::uintptr_t target, std::size_t size) {
     return nullptr;
 }
 
-bool write_code(std::uintptr_t address, const void* bytes, std::size_t size) {
+bool write_code(std::uintptr_t address, const void* bytes, std::size_t size, const void* expected = nullptr) {
     if (size > 32) return false;
     // Prepare handles before suspending: never allocate while an engine thread
     // might hold the process heap lock. Refuse to patch an occupied instruction.
@@ -164,7 +167,8 @@ bool write_code(std::uintptr_t address, const void* bytes, std::size_t size) {
     }
     DWORD previous{};
     bool result{};
-    if (safe && VirtualProtect(reinterpret_cast<void*>(address), size, PAGE_EXECUTE_READWRITE, &previous)) {
+    if (safe && (!expected || std::memcmp(reinterpret_cast<void*>(address), expected, size) == 0) &&
+        VirtualProtect(reinterpret_cast<void*>(address), size, PAGE_EXECUTE_READWRITE, &previous)) {
         std::uint8_t original[32]{};
         std::memcpy(original, reinterpret_cast<void*>(address), size);
         std::memcpy(reinterpret_cast<void*>(address), bytes, size);
@@ -319,12 +323,24 @@ bool Initialize() {
         Shutdown();
         return false;
     }
+    const bool prop_hook = install_hook(base, ShroudforgeCompatibility::EnshroudedClient::world_prop_update_signature,
+        ShroudforgeCompatibility::EnshroudedClient::world_prop_update_original.data(),
+        ShroudforgeCompatibility::EnshroudedClient::world_prop_update_original.size(),
+        reinterpret_cast<void*>(&WorldRuntime::OnPropUpdate));
+    const bool placement_hook = install_hook(base, ShroudforgeCompatibility::EnshroudedClient::world_actor_placement_signature,
+        ShroudforgeCompatibility::EnshroudedClient::world_actor_placement_original.data(),
+        ShroudforgeCompatibility::EnshroudedClient::world_actor_placement_original.size(),
+        reinterpret_cast<void*>(&WorldRuntime::OnActorPlacement));
+    entity_context_hooks_ready.store(prop_hook && placement_hook, std::memory_order_release);
     accepting.store(true, std::memory_order_release);
+    PatchRuntime::Initialize();
     return true;
 }
 
 void Shutdown() {
+    PatchRuntime::Shutdown();
     accepting.store(false, std::memory_order_release);
+    entity_context_hooks_ready.store(false, std::memory_order_release);
     for (auto iterator = hooks.rbegin(); iterator != hooks.rend(); ++iterator) {
         if (iterator->target && iterator->original.size() &&
             write_code(iterator->target, iterator->original.data(), iterator->original.size()))
@@ -349,6 +365,9 @@ bool Ready() {
     return accepting.load(std::memory_order_acquire) &&
         engine_thread.load(std::memory_order_acquire) && drain &&
         GetTickCount64() - drain <= 500;
+}
+bool EntityContextReady() {
+    return entity_context_hooks_ready.load(std::memory_order_acquire) && Ready();
 }
 std::uint32_t ThreadId() { return engine_thread.load(std::memory_order_acquire); }
 std::uintptr_t EntityManager() { return entity_manager.load(std::memory_order_acquire); }
@@ -413,6 +432,7 @@ std::string Diagnostics() {
     return nlohmann::json({
         {"accepting", accepting.load()}, {"threadId", engine_thread.load()},
         {"ready", Ready()},
+        {"entityContextHooksReady", EntityContextReady()},
         {"entityManagerObserved", entity_manager.load() != 0},
         {"entityManagerChanges", manager_changes.load()},
         {"lastManagerObservationAgeMs", manager_last ? nlohmann::json(GetTickCount64() - manager_last) : nlohmann::json(nullptr)},
@@ -423,5 +443,8 @@ std::string Diagnostics() {
         {"queueDepth", lock ? nlohmann::json(queue.size()) : nlohmann::json(nullptr)},
         {"queueLimit",128}, {"batchLimit",8}, {"batchBudgetMs",2}
     }).dump();
+}
+bool WriteCode(std::uintptr_t address, const void* expected, const void* replacement, std::size_t size) {
+    return address && expected && replacement && size && write_code(address, replacement, size, expected);
 }
 }
