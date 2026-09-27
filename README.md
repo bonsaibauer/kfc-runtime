@@ -1,62 +1,188 @@
 # KFC Runtime
 
-Windows x64 live Enshrouded provider, independent of the KFC asset parser.
+KFC Runtime is an independent Windows x64 runtime DLL for Enshrouded. A
+modloader loads the DLL and calls its stable C ABI. It does not depend on
+`kfc-parser`; the developer tools can consume the parser's reflection output
+when preparing a new game build.
 
-Build with `cmake -S . -B build -A x64` and
-`cmake --build build --config Release`. Install using
-`cmake --install build --config Release --prefix <staging-directory>`.
+## Project layout
 
-The DLL belongs next to the game executable. Compatibility profiles from
-`compatibility/profiles/` are embedded into the DLL during the CMake build.
-Provider ABI 4 exports `KfcRuntimeAbi`, Initialize/Tick/Shutdown/Status, the
-`ShroudforgeEcs*` component interface, bounded voxel read/write, and typed
-profile-backed entity calls, and guarded build-profile runtime patches. Existing consumers must check ABI 4 before resolving
-operations. A profile change requires rebuilding the runtime DLL. Changes to
-native behavior require a new runtime DLL; incompatible provider ABI changes also
-require a host update.
+| Path | Purpose | Shipped to a modloader? |
+| --- | --- | --- |
+| `src/windows/` | Runtime implementation | Compiled into the DLL |
+| `include/kfc_runtime/runtime.h` | Public C ABI for native modloader hosts | Yes, with the SDK package |
+| `profiles/<game>/<target>/<build>.json` | Approved runtime profile for one executable build | Embedded in the DLL |
+| `profiles/<game>/<target>/<target>-<build>.components.json` | Component map referenced by that profile | Embedded in the DLL |
+| `sdk/runtime-api.json` | ABI/export inventory | Yes, with the SDK package |
+| `dev/function-catalogs/<game>/<target>/<build>.json` | Function signatures and review evidence used during development | No; development package only |
+| `dev/schemas/` | Schemas for profile, component, and function catalog data | No; development package only |
+| `dev/tools/` | Build selection, inspection, capture, and profile review tools | No; development package only |
+| `devdata/<build-id>/` | Local captures and unapproved drafts; ignored by Git | No |
 
-The world Lua surface exposes profile-backed voxel read/write and typed entity
-spawn/place/destroy/finish calls. Spawn is dispatched from the prop update with
-the live execution view; placement calls require the actor placement frame. A
-spawn token confirms only that the native command was queued. Placement and
-removal report native dispatch, not persistence or entity-manager materialization.
+Each build has one approved profile and its adjacent `.components.json` file.
+Function catalogs are development evidence and are never loaded by the runtime.
+New drafts stay in `devdata`; only reviewed, approved profile files are promoted
+to `profiles/` and embedded by the runtime build.
 
-Profiles are selected for the running process by executable name and PE image
-timestamp and size. A unique exact image match always takes priority. If there
-is no exact match, structural revalidation is allowed only when exactly one
-profile for that executable opts in. An opted-in profile must pass structural
-checks for a changed image:
-all dispatcher and world-context hook signatures must match uniquely, overwritten bytes must match, parser
-component sizes must agree, and live accesses validate identity and stride.
-These checks are not proof that every engine semantic remains unchanged.
-New hook calling conventions require native implementation work, not merely
-editing offsets. The supplied profile derives from client build 1076226.
+## What the modloader receives
 
-KFC reflection entries describe data types and layouts; they do not name
-executable functions or gameplay operations. Runtime patch IDs are stable
-operation names resolved through build-specific code signatures. The runtime
-accepts a patch only when its signature matches exactly once, and diagnostics
-include the match count and target RVA so a known operation can be checked
-against the installed executable.
+The **Runtime** package is what any native modloader consumes:
 
-The ECS diagnostic also records each live entity's template UUID/name alongside
-that archetype's component indices, strides and offsets. These rows can be
-joined to extracted `TemplateResource` assets by UUID; this supplies per-template
-constraints for resolving same-size component types without relying on serialized
-component order. The snapshot is diagnostic evidence, not an automatic index
-assignment when multiple mappings still fit.
+```text
+bin/kfc-runtime.dll
+lib/kfc-runtime.lib
+include/kfc_runtime/runtime.h
+share/kfc-runtime/runtime-api.json
+licenses/nlohmann-json/LICENSE.MIT
+```
 
-Hooks retain published trampoline memory and pin this DLL until process exit.
-Shutdown stops admission and attempts to restore original code without
-freeing return addresses that may still be on engine thread stacks. Runtime
-binary updates therefore take effect after game exit, not by hot-unloading.
+The **Development** package contains the developer console, approved profile
+sources, function catalogs, and schemas. It is not needed by players or by the
+modloader at game launch. Both packages carry the same project version; the
+runtime ABI version is queried from `KfcRuntimeAbi()` and must match before the
+host resolves other functions.
 
-Timed-out queries/read operations retain their own storage until completion.
-A write that has already started may complete after a timeout: consumers
-must reconcile state before retrying non-idempotent operations.
+The C ABI currently exposes lifecycle/diagnostics, ECS describe/query/resolve/
+read/guarded-write, profile-backed world operations, and named guarded patches.
+It does not expose a Lua VM or automatically load arbitrary native plug-ins.
+Different modloaders can integrate through the same public header and DLL ABI.
 
-Third-party dependency: nlohmann/json 3.12.0, MIT; see third_party/nlohmann.
+## Build and package
 
-Standalone inspection tools are maintained in ShroudForge under
-`Shroudforge_Modules/runtime-diagnostics/native-tools`. This repository contains
-the native provider, its public interface and build-specific compatibility data.
+Use Windows x64 with CMake 3.24+ and MSVC:
+
+```powershell
+cmake -S . -B build -A x64
+cmake --build build --config Release
+cmake --build build --config Release --target package
+```
+
+The generated ZIP packages are under `build/`. To stage only the runtime SDK:
+
+```powershell
+cmake --install build --config Release --component Runtime --prefix out\runtime
+```
+
+The modloader ships `out\runtime\bin\kfc-runtime.dll` with its game integration
+and uses the installed public header as the ABI contract. It can consume a
+versioned Runtime ZIP or pin this repository as a Git submodule at a release
+commit. The modloader should not keep another copy of `src/windows/`.
+
+## Runtime profiles
+
+Profiles live only in `profiles/`, grouped by game, target, and game build. For
+example, the current profile for client build 1076226 is:
+
+```text
+profiles/enshrouded/client/1076226.json
+profiles/enshrouded/client/enshrouded-client-1076226.components.json
+```
+
+The profile contains hook signatures, structural offsets, named world
+operations, and guarded patch definitions. Its `componentCatalog` field points
+to the adjacent component map. CMake embeds the profile and sidecar in the DLL;
+at runtime the provider verifies the executable identity and loads only the
+matching approved profile. A new profile or component map requires rebuilding
+the DLL so the matching embedded resources ship together.
+
+PE timestamp and image size are recorded for identity. Newly generated profiles
+also record executable SHA-256 and require an exact hash match. The shipped
+1076226 profile predates SHA-256 provenance and uses timestamp plus image size.
+
+## Developer workflow for a new build
+
+The developer tools run only while adding support for a new game build. They do
+not run at game launch:
+
+```powershell
+$exe = 'D:\Games\Enshrouded\enshrouded.exe'
+$capture = 'devdata\enshrouded-client-new-build'
+build\Release\kfc-runtime-dev.exe select-build $exe --out-dir $capture
+build\Release\kfc-runtime-dev.exe extract-profile-functions `
+  profiles\enshrouded\client\1076226.json --out "$capture\functions.json"
+```
+
+`select-build` records PE identity, compiler-described x64 function ranges, and
+heuristic leads. It scans an existing function catalog only when the selected
+executable matches that catalog's PE timestamp and image size. For a new build,
+review/update the extracted development catalog's signatures, expected RVAs,
+original bytes, calling conventions, and side effects, then scan it:
+
+```powershell
+build\Release\kfc-runtime-dev.exe scan-functions $exe `
+  "$capture\functions.json" --out "$capture\function-scan.json"
+```
+
+Function ranges and byte matches do not infer source names or prove call
+semantics. A developer must review the actual functions and calling conventions.
+
+Start the same game executable, load into a world, then capture the live ECS
+registry and join it against `kfc-parser`'s `reflection_data.json`:
+
+```powershell
+$game = Get-Process enshrouded | Select-Object -First 1
+$reflection = '<path to kfc-parser reflection_data.json>'
+build\Release\kfc-runtime-capture-ecs.exe $game.Id 2>&1 | Tee-Object "$capture\ecs-capture.log"
+build\Release\kfc-runtime-dev.exe import-ecs-capture "$capture\ecs-capture.log" `
+  --image-report "$capture\image-report.json" --reflection $reflection `
+  --id enshrouded-client-new-build --out "$capture\components-live.json"
+```
+
+The importer reads the parser's native `version`/`types` format (`qualifiedName`
+and `size`) and also accepts the normalized `entries` format. Parser `version`
+identifies KFC data, not the game executable build; pass `--id` to name the game
+build. Any unresolved name/size joins block profile approval.
+
+Generate and validate a draft entirely under `devdata/`:
+
+```powershell
+$profileDraft = "$capture\new-build.json"
+$componentsDraft = "$capture\enshrouded-client-new-build.components.json"
+build\Release\kfc-runtime-dev.exe generate-profile `
+  profiles\enshrouded\client\1076226.json `
+  "$capture\image-report.json" "$capture\function-scan.json" `
+  --components "$capture\components-live.json" `
+  --catalog-out $componentsDraft --out $profileDraft
+build\Release\kfc-runtime-dev.exe validate-profile $profileDraft
+build\Release\kfc-runtime-dev.exe approve-profile $profileDraft `
+  --function-scan "$capture\function-scan.json" --components $componentsDraft
+```
+
+Generation applies unique scanned hook signatures, shifted world-function RVAs,
+and patch target/function ranges to the draft. It keeps structural offsets and
+global data RVAs as review items because a binary signature scan cannot infer
+their meaning. Approval checks exact executable identity, unique byte matches,
+zero unresolved ECS joins, structural validity, and explicit developer review
+of live layouts and function behavior. An unapproved draft is rejected by the
+runtime.
+
+After approval, place the pair under the build's production profile path and
+build/package the DLL:
+
+```powershell
+$profileDir = 'profiles\enshrouded\client'
+Copy-Item $profileDraft "$profileDir\new-build.json"
+Copy-Item $componentsDraft "$profileDir\enshrouded-client-new-build.components.json"
+cmake --build build --config Release --target kfc-runtime
+cmake --build build --config Release --target package
+```
+
+The approved profile and component sidecar are the only per-build runtime data.
+The function catalog, capture logs, reflection source, and draft stay in the
+development area.
+
+## Runtime behavior and limits
+
+Profiles are selected by exact executable identity. If exact identity is absent,
+structural revalidation is allowed only for a unique profile that explicitly
+opts in and passes hook, byte, component-size, and live-access checks. These
+checks do not prove that every engine semantic stayed the same; new function
+semantics or calling conventions require profile review and sometimes native
+implementation changes.
+
+The provider retains hook trampolines and pins its DLL until process exit.
+Shutdown stops new work and attempts to restore original code without freeing
+addresses that may still be on engine thread stacks. Runtime binary updates take
+effect after the game exits, not by hot-unloading. Timed-out writes may finish
+after the caller times out, so hosts must reconcile state before retrying
+non-idempotent operations.

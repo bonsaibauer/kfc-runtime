@@ -22,23 +22,3 @@ bool DestroyEntity(const double position[3], const double rotation[4], const flo
                    std::uint32_t tracking, std::uint32_t feedback, std::uint32_t* outcome);
 bool FinishBuilding(bool complete, std::uint32_t* outcome);
 }
-
-extern "C" {
-KFC_EXPORT bool __cdecl ShroudforgeWorldOperationAvailable(const char* name);
-KFC_EXPORT bool __cdecl ShroudforgeWorldContextActive();
-KFC_EXPORT bool __cdecl ShroudforgeWorldEntityContextReady();
-KFC_EXPORT bool __cdecl ShroudforgeWorldVoxelRead(const std::int32_t* origin,
-    const std::uint32_t* dimensions, std::uint16_t* values,
-    std::size_t capacity, std::size_t* actual);
-KFC_EXPORT bool __cdecl ShroudforgeWorldVoxelWrite(const std::int32_t* origin,
-    const std::uint32_t* dimensions, const std::uint16_t* values,
-    std::size_t count, std::uint32_t* outcome);
-KFC_EXPORT bool __cdecl ShroudforgeWorldEntitySpawn(const std::uint64_t* template_uuid, const double* position,
-    const double* rotation, std::uint32_t tracking, std::uint32_t flags,
-    std::uint32_t* queue_token, std::uint32_t* outcome);
-KFC_EXPORT bool __cdecl ShroudforgeWorldEntityPlace(const double* position, const double* rotation,
-    const float* bounds, std::uint32_t tracking, std::uint32_t feedback, std::uint32_t* outcome);
-KFC_EXPORT bool __cdecl ShroudforgeWorldEntityDestroy(const double* position, const double* rotation,
-    const float* bounds, std::uint32_t tracking, std::uint32_t feedback, std::uint32_t* outcome);
-KFC_EXPORT bool __cdecl ShroudforgeWorldEntityFinishBuilding(bool complete, std::uint32_t* outcome);
-}

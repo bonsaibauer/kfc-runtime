@@ -1,12 +1,47 @@
 #include "profile.h"
-#include "logging_config.h"
-#include "embedded_compatibility_profile_ids.h"
+#include "embedded_profile_ids.h"
 #include <windows.h>
+#include <bcrypt.h>
 #include <filesystem>
+#include <fstream>
 #include <unordered_set>
+#include <vector>
 #include "../../third_party/nlohmann/json.hpp"
 
 namespace ShroudforgeCompatibility::EnshroudedClient {
+namespace {
+std::string sha256_file(const std::filesystem::path& path) {
+    BCRYPT_ALG_HANDLE algorithm{};
+    BCRYPT_HASH_HANDLE hash{};
+    DWORD object_size{}, digest_size{}, received{};
+    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0) return {};
+    if (BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&object_size), sizeof(object_size), &received, 0) < 0 ||
+        BCryptGetProperty(algorithm, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&digest_size), sizeof(digest_size), &received, 0) < 0) {
+        BCryptCloseAlgorithmProvider(algorithm, 0); return {};
+    }
+    std::vector<UCHAR> object(object_size), digest(digest_size), chunk(1u << 20);
+    if (BCryptCreateHash(algorithm, &hash, object.data(), object_size, nullptr, 0, 0) < 0) {
+        BCryptCloseAlgorithmProvider(algorithm, 0); return {};
+    }
+    std::ifstream input(path, std::ios::binary);
+    bool ok = static_cast<bool>(input);
+    while (ok && input) {
+        input.read(reinterpret_cast<char*>(chunk.data()), static_cast<std::streamsize>(chunk.size()));
+        const auto count = input.gcount();
+        if (count > 0 && BCryptHashData(hash, chunk.data(), static_cast<ULONG>(count), 0) < 0) ok = false;
+    }
+    ok = ok && input.eof() && BCryptFinishHash(hash, digest.data(), digest_size, 0) >= 0;
+    BCryptDestroyHash(hash);
+    BCryptCloseAlgorithmProvider(algorithm, 0);
+    if (!ok) return {};
+    constexpr char digits[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(digest.size() * 2);
+    for (const auto byte : digest) { result.push_back(digits[byte >> 4]); result.push_back(digits[byte & 15]); }
+    return result;
+}
+}
+
 bool Load() {
     try {
         HMODULE self{};
@@ -15,6 +50,7 @@ bool Load() {
         wchar_t process_path[32768]{};
         if (!GetModuleFileNameW(nullptr, process_path, 32768)) return false;
         const auto process = std::filesystem::path(process_path).filename().string();
+        const auto process_hash = sha256_file(process_path);
         const auto base = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
         const auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
         if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
@@ -22,7 +58,7 @@ bool Load() {
         if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return false;
         nlohmann::json exact_profile, fallback_profile;
         unsigned exact_count{}, fallback_count{};
-        for (const auto resource_id : ShroudforgeEmbeddedProfiles::resource_ids) {
+        for (const auto resource_id : KfcRuntimeEmbedded::profile_resource_ids) {
             const auto resource = FindResourceW(self, MAKEINTRESOURCEW(resource_id), MAKEINTRESOURCEW(10));
             if (!resource) throw std::runtime_error("embedded compatibility profile is missing");
             const auto loaded = LoadResource(self, resource);
@@ -32,8 +68,24 @@ bool Load() {
             if (!data || !size) throw std::runtime_error("embedded compatibility profile is empty");
             auto candidate = nlohmann::json::parse(data, data + size);
             if (candidate.at("schemaVersion") != 1 || candidate.at("target") != process) continue;
+            // Generated profile drafts are developer artifacts. They must never
+            // become active merely because the EXE identity happens to match.
+            if (candidate.contains("provenance") &&
+                candidate.at("provenance").value("status", std::string{}) != "approved") continue;
             const bool matches = candidate.at("image").at("timestamp") == nt->FileHeader.TimeDateStamp &&
-                candidate.at("image").at("size") == nt->OptionalHeader.SizeOfImage;
+                candidate.at("image").at("size") == nt->OptionalHeader.SizeOfImage &&
+                (!candidate.at("image").contains("sha256") ||
+                 (!process_hash.empty() && candidate.at("image").at("sha256").get<std::string>() == process_hash));
+            if (candidate.contains("provenance")) {
+                const auto& provenance = candidate.at("provenance");
+                if (provenance.value("status", std::string{}) != "approved" ||
+                    !provenance.value("runtimeLayoutValidated", false) ||
+                    !provenance.value("componentMappingsValidated", false) ||
+                    !provenance.value("functionSemanticsValidated", false) ||
+                    !candidate.at("image").contains("sha256") ||
+                    provenance.value("executableSha256", std::string{}) != candidate.at("image").at("sha256").get<std::string>() ||
+                    provenance.value("unresolvedComponentCount", std::size_t(-1)) != 0) continue;
+            }
             if (matches) {
                 ++exact_count;
                 exact_profile = std::move(candidate);
@@ -109,7 +161,42 @@ bool Load() {
         runtime_components.clear();
         std::unordered_set<std::string> names;
         std::unordered_set<unsigned> indices;
-        for (const auto& component : selected.at("components")) {
+        nlohmann::json component_catalog_data;
+        const nlohmann::json* component_entries{};
+        if (selected.contains("components")) {
+            component_entries = &selected.at("components");
+        } else {
+            const auto catalog_name = selected.at("componentCatalog").get<std::string>();
+            if (catalog_name.empty() || std::filesystem::path(catalog_name).filename().string() != catalog_name)
+                throw std::runtime_error("invalid embedded component catalog name");
+            int catalog_resource{};
+            for (std::size_t index = 0; index < std::size(KfcRuntimeEmbedded::component_resource_ids); ++index) {
+                if (catalog_name == KfcRuntimeEmbedded::component_resource_names[index]) {
+                    catalog_resource = KfcRuntimeEmbedded::component_resource_ids[index];
+                    break;
+                }
+            }
+            if (!catalog_resource) throw std::runtime_error("embedded component catalog is missing: " + catalog_name);
+            const auto resource = FindResourceW(self, MAKEINTRESOURCEW(catalog_resource), MAKEINTRESOURCEW(10));
+            if (!resource) throw std::runtime_error("embedded component catalog resource is missing");
+            const auto loaded = LoadResource(self, resource);
+            const auto size = SizeofResource(self, resource);
+            const auto* data = static_cast<const char*>(LockResource(loaded));
+            if (!data || !size) throw std::runtime_error("embedded component catalog is empty");
+            component_catalog_data = nlohmann::json::parse(data, data + size);
+            if (component_catalog_data.at("schemaVersion") != 1 ||
+                component_catalog_data.at("id") != selected.at("id") ||
+                component_catalog_data.at("target") != selected.at("target") ||
+                component_catalog_data.at("image").at("timestamp") != selected.at("image").at("timestamp") ||
+                component_catalog_data.at("image").at("size") != selected.at("image").at("size") ||
+                (selected.at("image").contains("sha256") &&
+                 component_catalog_data.at("image").value("sha256", std::string{}) != selected.at("image").at("sha256").get<std::string>()))
+                throw std::runtime_error("component catalog does not match selected profile identity");
+            component_entries = &component_catalog_data.at("components");
+        }
+        if (!component_entries || !component_entries->is_array())
+            throw std::runtime_error("profile component catalog is not an array");
+        for (const auto& component : *component_entries) {
             const auto name = component.at("name").get<std::string>();
             const auto index = component.at("index").get<unsigned>();
             const auto size = component.at("size").get<unsigned>();
@@ -214,11 +301,7 @@ bool Load() {
         return true;
     } catch (const std::exception& error) {
         status = std::string("profile-error:") + error.what();
-        HMODULE self{};
-        wchar_t path[32768]{};
-        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            reinterpret_cast<LPCWSTR>(&Load), &self) && GetModuleFileNameW(self,path,32768) &&
-            KfcRuntimeConfig::Allows(std::filesystem::path(path).parent_path(),'E')) OutputDebugStringA(status.c_str());
+        OutputDebugStringA(status.c_str());
         return false;
     }
 }

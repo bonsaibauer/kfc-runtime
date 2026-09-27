@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "providerAbi": 4,
+  "providerExports": [
+    { "name": "KfcRuntimeAbi", "signature": "unsigned __cdecl()", "purpose": "Return provider ABI version." },
+    { "name": "KfcRuntimeInitialize", "signature": "bool __cdecl()", "purpose": "Load embedded profile and install runtime hooks." },
+    { "name": "KfcRuntimeTick", "signature": "void __cdecl()", "purpose": "Refresh live ECS layout and runtime state." },
+    { "name": "KfcRuntimeShutdown", "signature": "void __cdecl()", "purpose": "Stop command admission and restore hooks where safe." },
+    { "name": "KfcRuntimeStatus", "signature": "void __cdecl(char*, size_t)", "purpose": "Return compact provider status text." },
+    { "name": "KfcRuntimeDiagnostics", "signature": "void __cdecl(char*, size_t)", "purpose": "Return provider diagnostics as JSON." }
+  ],
+  "ecsExports": [
+    { "name": "ShroudforgeEcsConfigure", "signature": "bool __cdecl(const char* const*, const uint32_t*, size_t)", "purpose": "Configure host-requested component names and expected sizes." },
+    { "name": "ShroudforgeEcsReady", "signature": "bool __cdecl()", "purpose": "Report game-thread and ECS layout readiness." },
+    { "name": "ShroudforgeEcsCanWrite", "signature": "bool __cdecl()", "purpose": "Report guarded ECS write availability." },
+    { "name": "ShroudforgeEcsDescribe", "signature": "bool __cdecl(const char*, uint32_t*)", "purpose": "Resolve a component and return its size." },
+    { "name": "ShroudforgeEcsQuery", "signature": "size_t __cdecl(const char* const*, size_t, uint32_t*, size_t)", "purpose": "Query entities matching all named components." },
+    { "name": "ShroudforgeEcsResolve", "signature": "uint32_t __cdecl(uint32_t)", "purpose": "Resolve a game entity ID to an opaque runtime handle." },
+    { "name": "ShroudforgeEcsRead", "signature": "bool __cdecl(uint32_t, const char*, void*, size_t)", "purpose": "Read one profile-backed component value." },
+    { "name": "ShroudforgeEcsWrite", "signature": "bool __cdecl(uint32_t, const char*, const void*, const void*, size_t)", "purpose": "Compare-and-write a guarded profile-backed component value." }
+  ],
+  "worldExports": [
+    { "name": "ShroudforgeWorldOperationAvailable", "purpose": "Check whether a named profile operation is available." },
+    { "name": "ShroudforgeWorldContextActive", "purpose": "Check whether a validated active world context is available." },
+    { "name": "ShroudforgeWorldEntityContextReady", "purpose": "Check whether a live actor placement context is available." },
+    { "name": "ShroudforgeWorldVoxelRead", "purpose": "Read a bounded voxel range." },
+    { "name": "ShroudforgeWorldVoxelWrite", "purpose": "Write a bounded voxel range." },
+    { "name": "ShroudforgeWorldEntitySpawn", "purpose": "Queue typed entity spawn from a live execution context." },
+    { "name": "ShroudforgeWorldEntityPlace", "purpose": "Dispatch typed entity placement from a live placement context." },
+    { "name": "ShroudforgeWorldEntityDestroy", "purpose": "Dispatch typed entity removal from a live placement context." },
+    { "name": "ShroudforgeWorldEntityFinishBuilding", "purpose": "Dispatch the profile-backed finish-building event." }
+  ],
+  "patchExports": [
+    { "name": "ShroudforgeRuntimePatchAvailable", "purpose": "Check whether a named guarded patch is available." },
+    { "name": "ShroudforgeRuntimePatchSetEnabled", "purpose": "Enable or disable a named guarded patch." }
+  ],
+  "modRuntime": {
+    "luaVm": false,
+    "emlBindings": false,
+    "kfcAssetParser": false,
+    "nativePluginLoader": false,
+    "supportedSurfaces": ["ECS", "world operations", "guarded runtime patches"]
+  }
+}

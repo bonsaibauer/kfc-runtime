@@ -11,8 +11,11 @@
     "layout",
     "entityDefinition",
     "hooks",
-    "worldContexts",
-    "components"
+    "worldContexts"
+  ],
+  "oneOf": [
+    { "required": ["components"] },
+    { "required": ["componentCatalog"] }
   ],
   "properties": {
     "schemaVersion": {
@@ -39,6 +42,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
         "size": {
           "type": "integer",
           "minimum": 4096
@@ -47,6 +54,32 @@
     },
     "allowStructuralRevalidation": {
       "type": "boolean"
+    },
+    "componentCatalog": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+\\.json$"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "generator", "executableSha256", "functionScan", "componentCapture", "runtimeLayoutValidated", "componentMappingsValidated", "functionSemanticsValidated", "unresolvedComponentCount"],
+      "properties": {
+        "status": { "enum": ["draft-requires-live-review", "approved"] },
+        "generator": { "type": "string", "minLength": 1 },
+        "executableSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "imageReport": { "type": "string", "minLength": 1 },
+        "functionScan": { "type": "string", "minLength": 1 },
+        "componentCapture": { "type": "string", "minLength": 1 },
+        "reflectionCatalog": { "type": "string" },
+        "allFunctionCandidatesUnique": { "type": "boolean" },
+        "runtimeLayoutValidated": { "type": "boolean" },
+        "componentMappingsValidated": { "type": "boolean" },
+        "functionSemanticsValidated": { "type": "boolean" },
+        "unresolvedComponentCount": { "type": "integer", "minimum": 0 },
+        "reviewer": { "type": "string", "minLength": 1 },
+        "reviewedAtFileTimeUtc": { "type": "integer", "minimum": 0 },
+        "reviewEvidence": { "type": "array", "items": { "type": "string" } }
+      }
     },
     "layout": {
       "type": "object",
