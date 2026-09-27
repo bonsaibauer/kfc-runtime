@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(kfc-runtime VERSION 1.0.0 LANGUAGES CXX)
+project(kfc-runtime VERSION 2.0.0 LANGUAGES CXX)
 
 if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "The current Enshrouded provider requires Windows x64")
@@ -108,21 +108,48 @@ if(MSVC)
     target_compile_options(kfc-runtime-capture-ecs PRIVATE /W4 /EHsc)
 endif()
 
+# Game-specific profile investigation tools. These ship only in the development package.
+foreach(tool inspect-component-metadata live-entity-manager-sample live-entity-managers live-type-references)
+    add_executable(kfc-runtime-${tool} dev/tools/enshrouded/native/${tool}.cpp)
+    target_compile_features(kfc-runtime-${tool} PRIVATE cxx_std_20)
+    set_property(TARGET kfc-runtime-${tool} PROPERTY MSVC_RUNTIME_LIBRARY
+        "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endforeach()
+add_executable(kfc-runtime-audit-live-component-registry
+    dev/tools/enshrouded/native/audit-live-component-registry.cpp)
+target_compile_features(kfc-runtime-audit-live-component-registry PRIVATE cxx_std_20)
+target_include_directories(kfc-runtime-audit-live-component-registry PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+set_property(TARGET kfc-runtime-audit-live-component-registry PROPERTY MSVC_RUNTIME_LIBRARY
+    "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 # Runtime package: only the DLL, stable host SDK, API inventory, and license.
 install(TARGETS kfc-runtime
     RUNTIME DESTINATION bin COMPONENT Runtime
     ARCHIVE DESTINATION lib COMPONENT Runtime)
 install(FILES include/kfc_runtime/runtime.h DESTINATION include/kfc_runtime COMPONENT Runtime)
-install(FILES sdk/runtime-api.json DESTINATION share/kfc-runtime COMPONENT Runtime)
+install(FILES README.md DESTINATION share/kfc-runtime COMPONENT Runtime)
+install(FILES sdk/runtime-api.json DESTINATION share/kfc-runtime/sdk COMPONENT Runtime)
+install(FILES docs/SDK.md docs/Architecture.md docs/Profiles.md
+    DESTINATION share/kfc-runtime/docs COMPONENT Runtime)
+install(FILES dev/README.md DESTINATION share/kfc-runtime/dev COMPONENT Runtime)
 install(FILES third_party/nlohmann/LICENSE.MIT
     DESTINATION licenses/nlohmann-json COMPONENT Runtime)
 
 # Optional maintainer package: profile sources and the developer-only workflow.
 install(TARGETS kfc-runtime-dev kfc-runtime-capture-ecs
+    kfc-runtime-inspect-component-metadata
+    kfc-runtime-live-entity-manager-sample
+    kfc-runtime-live-entity-managers
+    kfc-runtime-live-type-references
+    kfc-runtime-audit-live-component-registry
     RUNTIME DESTINATION tools COMPONENT Development)
 install(DIRECTORY profiles/ DESTINATION share/kfc-runtime/profiles COMPONENT Development)
 install(DIRECTORY dev/function-catalogs/ DESTINATION share/kfc-runtime/dev/function-catalogs COMPONENT Development)
 install(DIRECTORY dev/schemas/ DESTINATION share/kfc-runtime/dev/schemas COMPONENT Development)
+install(FILES docs/Architecture.md docs/Profiles.md DESTINATION share/kfc-runtime/docs COMPONENT Development)
+install(FILES dev/tools/enshrouded/run-live-component-registry-audit.ps1
+    DESTINATION share/kfc-runtime/dev/tools/enshrouded COMPONENT Development)
 
 set(CPACK_GENERATOR ZIP)
 set(CPACK_PACKAGE_NAME "kfc-runtime")

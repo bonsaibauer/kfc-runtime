@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace ShroudforgeCompatibility::EnshroudedClient {
+namespace KfcRuntimeCompatibility::EnshroudedClient {
 struct RuntimeComponent { std::string qualified_name; std::uint16_t index; std::uint32_t size; };
 struct RuntimeOperation {
     std::string name;

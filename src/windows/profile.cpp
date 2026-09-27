@@ -8,7 +8,7 @@
 #include <vector>
 #include "../../third_party/nlohmann/json.hpp"
 
-namespace ShroudforgeCompatibility::EnshroudedClient {
+namespace KfcRuntimeCompatibility::EnshroudedClient {
 namespace {
 std::string sha256_file(const std::filesystem::path& path) {
     BCRYPT_ALG_HANDLE algorithm{};

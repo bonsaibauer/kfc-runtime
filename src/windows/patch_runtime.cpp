@@ -16,7 +16,7 @@
 
 namespace {
 struct PatchState {
-    const ShroudforgeCompatibility::EnshroudedClient::RuntimePatch* profile{};
+    const KfcRuntimeCompatibility::EnshroudedClient::RuntimePatch* profile{};
     std::uintptr_t target{};
     std::uint32_t function_begin_rva{}, function_end_rva{};
     std::size_t target_offset{};
@@ -190,7 +190,7 @@ bool Initialize() {
     patches.clear();
     const auto base = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(nullptr));
     if (!base) return false;
-    for (const auto& profile : ShroudforgeCompatibility::EnshroudedClient::runtime_patches) {
+    for (const auto& profile : KfcRuntimeCompatibility::EnshroudedClient::runtime_patches) {
         PatchState state{};
         state.profile = &profile;
         resolve(state, base);

@@ -185,7 +185,7 @@ bool entity_view(std::uintptr_t pointer, const ResolvedLayout& layout, EntityVie
         !read(pointer + layout.entity_row, entity.row) || entity.row > (1u << 24) ||
         !read(pointer + layout.entity_id, entity.id) || !entity.id ||
         !read(pointer + layout.entity_generation, entity.generation)) return false;
-    read(pointer + ShroudforgeCompatibility::EnshroudedClient::entity_definition, entity.definition);
+    read(pointer + KfcRuntimeCompatibility::EnshroudedClient::entity_definition, entity.definition);
     return true;
 }
 bool component_address(const EntityView& entity, const ResolvedLayout& layout,
@@ -195,8 +195,8 @@ bool component_address(const EntityView& entity, const ResolvedLayout& layout,
     if (component.index >= max_components ||
         !read(entity.layout + layout.component_bits + (component.index / 64) * 8, bits) ||
         !(bits & (std::uint64_t{1} << (component.index % 64))) ||
-        !read(entity.layout + ShroudforgeCompatibility::EnshroudedClient::component_offsets + component.index * 2, offset) ||
-        !read(entity.layout + ShroudforgeCompatibility::EnshroudedClient::component_strides + component.index * 2, stride) || stride != component.size) return false;
+        !read(entity.layout + KfcRuntimeCompatibility::EnshroudedClient::component_offsets + component.index * 2, offset) ||
+        !read(entity.layout + KfcRuntimeCompatibility::EnshroudedClient::component_strides + component.index * 2, stride) || stride != component.size) return false;
     address = entity.storage + offset + static_cast<std::uintptr_t>(entity.row) * stride;
     return readable(address, component.size);
 }
@@ -501,7 +501,7 @@ bool collect_layout_component_candidates(const EntityView& entity, const Resolve
 
 void collect_template_layout_sample(const EntityView& entity,
                                     const std::vector<ComponentSlot>& components) {
-    using namespace ShroudforgeCompatibility::EnshroudedClient;
+    using namespace KfcRuntimeCompatibility::EnshroudedClient;
     if (!entity.definition) return;
     struct DefinitionHeader {
         std::uint64_t uuid[2]{};
@@ -548,7 +548,7 @@ void publish_discovered_component_indices() {
     std::unordered_map<std::uint32_t, std::vector<std::string>> names_by_size;
     for (const auto& [name, size] : contract) names_by_size[size].push_back(name);
     std::unordered_map<std::string, ComponentType> discovered;
-    for (const auto& component : ShroudforgeCompatibility::EnshroudedClient::runtime_components) {
+    for (const auto& component : KfcRuntimeCompatibility::EnshroudedClient::runtime_components) {
         const auto known = contract.find(component.qualified_name);
         if (known != contract.end() && known->second == component.size)
             discovered.emplace(known->first, ComponentType{component.index, component.size});
@@ -579,8 +579,8 @@ void component_discovery_tick(std::uintptr_t manager) {
     std::scoped_lock discovery_lock(discovery_mutex);
     ResolvedLayout layout{};
     if (!layout_snapshot(layout)) return;
-    const auto count_address = manager + ShroudforgeCompatibility::EnshroudedClient::entity_manager_count;
-    const auto table_address = manager + ShroudforgeCompatibility::EnshroudedClient::entity_manager_table;
+    const auto count_address = manager + KfcRuntimeCompatibility::EnshroudedClient::entity_manager_count;
+    const auto table_address = manager + KfcRuntimeCompatibility::EnshroudedClient::entity_manager_table;
     std::uint64_t count{};
     std::uintptr_t table{};
     if (!read(count_address, count) || !count || count > (1u << 20) ||
@@ -630,7 +630,7 @@ void component_discovery_tick(std::uintptr_t manager) {
 
 namespace EcsRuntime {
 bool Initialize() {
-    if (!ShroudforgeCompatibility::EnshroudedClient::Load()) return false;
+    if (!KfcRuntimeCompatibility::EnshroudedClient::Load()) return false;
     image_base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     if (!image_base) return false;
     const auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image_base);
@@ -643,8 +643,8 @@ bool Initialize() {
 void Tick() {
     const auto manager = GameThreadDispatcher::EntityManager();
     if (!manager) return;
-    const auto count_address = manager + ShroudforgeCompatibility::EnshroudedClient::entity_manager_count;
-    const auto table_address = manager + ShroudforgeCompatibility::EnshroudedClient::entity_manager_table;
+    const auto count_address = manager + KfcRuntimeCompatibility::EnshroudedClient::entity_manager_count;
+    const auto table_address = manager + KfcRuntimeCompatibility::EnshroudedClient::entity_manager_table;
     std::uint64_t count{};
     std::uintptr_t table{};
     if (!read(count_address, count) || !count || count > (1u << 20) ||
@@ -666,14 +666,14 @@ void Tick() {
             live_table = table;
             live_layout.count_address = count_address;
             live_layout.table_address = table_address;
-            live_layout.entity_id = ShroudforgeCompatibility::EnshroudedClient::entity_id;
-            live_layout.entity_generation = ShroudforgeCompatibility::EnshroudedClient::entity_generation;
-            live_layout.entity_layout = ShroudforgeCompatibility::EnshroudedClient::entity_layout;
-            live_layout.entity_storage = ShroudforgeCompatibility::EnshroudedClient::entity_storage;
-            live_layout.entity_row = ShroudforgeCompatibility::EnshroudedClient::entity_row;
-            live_layout.component_bits = ShroudforgeCompatibility::EnshroudedClient::component_bits;
-            live_layout.component_offsets = ShroudforgeCompatibility::EnshroudedClient::component_offsets;
-            live_layout.component_strides = ShroudforgeCompatibility::EnshroudedClient::component_strides;
+            live_layout.entity_id = KfcRuntimeCompatibility::EnshroudedClient::entity_id;
+            live_layout.entity_generation = KfcRuntimeCompatibility::EnshroudedClient::entity_generation;
+            live_layout.entity_layout = KfcRuntimeCompatibility::EnshroudedClient::entity_layout;
+            live_layout.entity_storage = KfcRuntimeCompatibility::EnshroudedClient::entity_storage;
+            live_layout.entity_row = KfcRuntimeCompatibility::EnshroudedClient::entity_row;
+            live_layout.component_bits = KfcRuntimeCompatibility::EnshroudedClient::component_bits;
+            live_layout.component_offsets = KfcRuntimeCompatibility::EnshroudedClient::component_offsets;
+            live_layout.component_strides = KfcRuntimeCompatibility::EnshroudedClient::component_strides;
             layout_ready = true;
             ++layout_epoch;
             handles.clear();
@@ -699,9 +699,9 @@ std::string Status() {
          << ",layouts=" << discovered_layouts.size()
          << ",templates=" << template_layout_samples.size()
          << ",restarts=" << discovery_restarts << ')'
-         << " profile=" << ShroudforgeCompatibility::EnshroudedClient::status
+         << " profile=" << KfcRuntimeCompatibility::EnshroudedClient::status
          << " game_thread=" << GameThreadDispatcher::Status();
-    for (const auto& operation : ShroudforgeCompatibility::EnshroudedClient::runtime_operations)
+    for (const auto& operation : KfcRuntimeCompatibility::EnshroudedClient::runtime_operations)
         text << " world{" << operation.name << '=' << (operation.available ? operation.status : "unavailable") << '}';
     text << " voxel_context=" << (WorldRuntime::ActiveContextAvailable() ? "ready" : "waiting");
     if (types.empty()) return text.str() + " registry=unresolved layout=unavailable";
@@ -728,13 +728,13 @@ std::string Diagnostics() {
     nlohmann::json stride_candidates = nlohmann::json::array();
     nlohmann::json template_layouts = nlohmann::json::array();
     nlohmann::json world_operations = nlohmann::json::object();
-    for (const auto& operation : ShroudforgeCompatibility::EnshroudedClient::runtime_operations)
+    for (const auto& operation : KfcRuntimeCompatibility::EnshroudedClient::runtime_operations)
         world_operations[operation.name] = {{"available", operation.available}, {"status", operation.status},
             {"abi", operation.abi}, {"thread", operation.thread}, {"context", operation.context}};
     std::unordered_map<std::uint32_t, std::vector<std::string>> names_by_size;
     std::unordered_set<std::string> profile_names;
     std::size_t dynamic_candidates{};
-    for (const auto& component : ShroudforgeCompatibility::EnshroudedClient::runtime_components)
+    for (const auto& component : KfcRuntimeCompatibility::EnshroudedClient::runtime_components)
         profile_names.insert(component.qualified_name);
     for (const auto& [name, size] : configured_types) {
         names_by_size[size].push_back(name);
@@ -771,8 +771,8 @@ std::string Diagnostics() {
             {"entitiesSeen", sample.entity_count}, {"componentSlots", std::move(component_slots)}});
     }
     return nlohmann::json({
-        {"schemaVersion",1}, {"providerAbi",4},
-        {"profile",ShroudforgeCompatibility::EnshroudedClient::status},
+        {"schemaVersion",1}, {"providerAbi",5},
+        {"profile",KfcRuntimeCompatibility::EnshroudedClient::status},
         {"candidateTypeBreakdown",nlohmann::json{
             {"total",configured_types.size()},
             {"componentTypes",configured_types.size() - dynamic_candidates},
@@ -843,7 +843,7 @@ void Shutdown() {
 }
 }
 
-extern "C" bool __cdecl ShroudforgeEcsConfigure(const char* const* names,
+extern "C" bool __cdecl KfcRuntimeEcsConfigure(const char* const* names,
                                                 const std::uint32_t* sizes,
                                                 std::size_t count) {
     if (!names || !sizes || !count || count > 20'000) return false;
@@ -859,7 +859,7 @@ extern "C" bool __cdecl ShroudforgeEcsConfigure(const char* const* names,
         if (configured_types == contract) return true;
         configured_types = std::move(contract);
         types.clear();
-        for (const auto& component : ShroudforgeCompatibility::EnshroudedClient::runtime_components) {
+        for (const auto& component : KfcRuntimeCompatibility::EnshroudedClient::runtime_components) {
             const auto configured = configured_types.find(std::string(component.qualified_name));
             if (configured != configured_types.end() && configured->second == component.size)
                 types.emplace(configured->first, ComponentType{component.index, component.size});
@@ -877,24 +877,24 @@ extern "C" bool __cdecl ShroudforgeEcsConfigure(const char* const* names,
     return true;
 }
 
-extern "C" bool __cdecl ShroudforgeEcsReady() {
+extern "C" bool __cdecl KfcRuntimeEcsReady() {
     std::scoped_lock lock(state_mutex);
     return GameThreadDispatcher::Ready() && layout_ready && !types.empty();
 }
-extern "C" bool __cdecl ShroudforgeEcsCanWrite() {
+extern "C" bool __cdecl KfcRuntimeEcsCanWrite() {
     std::scoped_lock lock(state_mutex);
     return GameThreadDispatcher::Ready() && layout_ready && !types.empty();
 }
-extern "C" bool __cdecl ShroudforgeEcsDescribe(const char* name, std::uint32_t* size) {
+extern "C" bool __cdecl KfcRuntimeEcsDescribe(const char* name, std::uint32_t* size) {
     ComponentType component{};
     if (!size || !resolve_component(name, component)) return false;
     *size = component.size;
     return true;
 }
-extern "C" std::size_t __cdecl ShroudforgeEcsQuery(const char* const* names, std::size_t count,
+extern "C" std::size_t __cdecl KfcRuntimeEcsQuery(const char* const* names, std::size_t count,
                                                     std::uint32_t* entities, std::size_t capacity) {
     operation_counters.queries.fetch_add(1, std::memory_order_relaxed);
-    if (!names || !count || count > max_components || capacity > (1u << 20) || !ShroudforgeEcsReady()) {
+    if (!names || !count || count > max_components || capacity > (1u << 20) || !KfcRuntimeEcsReady()) {
         operation_counters.query_failures.fetch_add(1, std::memory_order_relaxed);
         return SIZE_MAX;
     }
@@ -925,9 +925,9 @@ extern "C" std::size_t __cdecl ShroudforgeEcsQuery(const char* const* names, std
     operation_counters.query_successes.fetch_add(1, std::memory_order_relaxed);
     return operation->result;
 }
-extern "C" std::uint32_t __cdecl ShroudforgeEcsResolve(std::uint32_t entity_id) {
+extern "C" std::uint32_t __cdecl KfcRuntimeEcsResolve(std::uint32_t entity_id) {
     operation_counters.resolves.fetch_add(1, std::memory_order_relaxed);
-    if (!entity_id || !ShroudforgeEcsReady()) {
+    if (!entity_id || !KfcRuntimeEcsReady()) {
         operation_counters.resolve_failures.fetch_add(1, std::memory_order_relaxed);
         return 0;
     }
@@ -941,10 +941,10 @@ extern "C" std::uint32_t __cdecl ShroudforgeEcsResolve(std::uint32_t entity_id) 
     else operation_counters.resolve_failures.fetch_add(1, std::memory_order_relaxed);
     return operation->result;
 }
-extern "C" bool __cdecl ShroudforgeEcsRead(std::uint32_t handle, const char* name,
+extern "C" bool __cdecl KfcRuntimeEcsRead(std::uint32_t handle, const char* name,
                                            void* value, std::size_t size) {
     operation_counters.reads.fetch_add(1, std::memory_order_relaxed);
-    if (!name || !value || !size || size > (1u << 20) || !ShroudforgeEcsReady()) {
+    if (!name || !value || !size || size > (1u << 20) || !KfcRuntimeEcsReady()) {
         operation_counters.read_failures.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
@@ -963,11 +963,11 @@ extern "C" bool __cdecl ShroudforgeEcsRead(std::uint32_t handle, const char* nam
     operation_counters.read_successes.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
-extern "C" bool __cdecl ShroudforgeEcsWrite(std::uint32_t handle, const char* name,
+extern "C" bool __cdecl KfcRuntimeEcsWrite(std::uint32_t handle, const char* name,
                                             const void* mask, const void* value,
                                             std::size_t size) {
     operation_counters.writes.fetch_add(1, std::memory_order_relaxed);
-    if (!name || !mask || !value || !size || size > (1u << 20) || !ShroudforgeEcsCanWrite()) {
+    if (!name || !mask || !value || !size || size > (1u << 20) || !KfcRuntimeEcsCanWrite()) {
         operation_counters.write_failures.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
@@ -987,10 +987,10 @@ extern "C" bool __cdecl ShroudforgeEcsWrite(std::uint32_t handle, const char* na
     else operation_counters.write_failures.fetch_add(1, std::memory_order_relaxed);
     return written;
 }
-extern "C" bool __cdecl ShroudforgeRuntimePatchAvailable(const char* name) {
+extern "C" bool __cdecl KfcRuntimePatchAvailable(const char* name) {
     if (name && std::strcmp(name, "runtime.gameplay.patch") == 0) return PatchRuntime::AnyAvailable();
     return PatchRuntime::Available(name);
 }
-extern "C" bool __cdecl ShroudforgeRuntimePatchSetEnabled(const char* name, bool enabled, std::uint32_t* outcome) {
+extern "C" bool __cdecl KfcRuntimePatchSetEnabled(const char* name, bool enabled, std::uint32_t* outcome) {
     return PatchRuntime::SetEnabled(name, enabled, outcome);
 }

@@ -709,14 +709,14 @@ int inspect_provider_command(int argc, char** argv) {
     json exports = json::array();
     constexpr std::string_view names[]{
         "KfcRuntimeAbi", "KfcRuntimeInitialize", "KfcRuntimeTick", "KfcRuntimeShutdown",
-        "KfcRuntimeStatus", "KfcRuntimeDiagnostics", "ShroudforgeEcsConfigure",
-        "ShroudforgeEcsReady", "ShroudforgeEcsCanWrite", "ShroudforgeEcsDescribe",
-        "ShroudforgeEcsQuery", "ShroudforgeEcsResolve", "ShroudforgeEcsRead", "ShroudforgeEcsWrite",
-        "ShroudforgeRuntimePatchAvailable", "ShroudforgeRuntimePatchSetEnabled",
-        "ShroudforgeWorldOperationAvailable", "ShroudforgeWorldContextActive",
-        "ShroudforgeWorldEntityContextReady", "ShroudforgeWorldVoxelRead", "ShroudforgeWorldVoxelWrite",
-        "ShroudforgeWorldEntitySpawn", "ShroudforgeWorldEntityPlace", "ShroudforgeWorldEntityDestroy",
-        "ShroudforgeWorldEntityFinishBuilding"
+        "KfcRuntimeStatus", "KfcRuntimeDiagnostics", "KfcRuntimeEcsConfigure",
+        "KfcRuntimeEcsReady", "KfcRuntimeEcsCanWrite", "KfcRuntimeEcsDescribe",
+        "KfcRuntimeEcsQuery", "KfcRuntimeEcsResolve", "KfcRuntimeEcsRead", "KfcRuntimeEcsWrite",
+        "KfcRuntimePatchAvailable", "KfcRuntimePatchSetEnabled",
+        "KfcRuntimeWorldOperationAvailable", "KfcRuntimeWorldContextActive",
+        "KfcRuntimeWorldEntityContextReady", "KfcRuntimeWorldVoxelRead", "KfcRuntimeWorldVoxelWrite",
+        "KfcRuntimeWorldEntitySpawn", "KfcRuntimeWorldEntityPlace", "KfcRuntimeWorldEntityDestroy",
+        "KfcRuntimeWorldEntityFinishBuilding"
     };
     bool complete = true;
     for (const auto name : names) {
@@ -727,12 +727,12 @@ int inspect_provider_command(int argc, char** argv) {
     const auto abi = abi_function ? abi_function() : 0;
     FreeLibrary(module);
     const json report = {{"schemaVersion", 1}, {"provider", path.string()}, {"providerAbi", abi},
-        {"expectedAbi", 4}, {"expectedExportsPresent", complete}, {"exports", std::move(exports)}};
+        {"expectedAbi", 5}, {"expectedExportsPresent", complete}, {"exports", std::move(exports)}};
     if (const auto out = option(argc, argv, "--out")) {
         if (!write_json(*out, report)) return 2;
         std::cout << "provider inventory: " << fs::absolute(*out).string() << '\n';
     } else std::cout << report.dump(2) << '\n';
-    return complete && abi == 4 ? 0 : 3;
+    return complete && abi == 5 ? 0 : 3;
 }
 
 int validate_command(const fs::path& path, const std::optional<fs::path>& component_path = std::nullopt) {

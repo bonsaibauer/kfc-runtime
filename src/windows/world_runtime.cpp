@@ -63,9 +63,9 @@ bool read_memory(std::uintptr_t address, void* output, std::size_t size) {
         reinterpret_cast<const void*>(address), output, size, &read) && read == size;
 }
 
-const ShroudforgeCompatibility::EnshroudedClient::RuntimeOperation* find_operation(const char* name) {
+const KfcRuntimeCompatibility::EnshroudedClient::RuntimeOperation* find_operation(const char* name) {
     if (!name) return nullptr;
-    const auto& operations = ShroudforgeCompatibility::EnshroudedClient::runtime_operations;
+    const auto& operations = KfcRuntimeCompatibility::EnshroudedClient::runtime_operations;
     const auto found = std::find_if(operations.begin(), operations.end(), [name](const auto& op) {
         return op.name == name;
     });
@@ -90,7 +90,7 @@ bool resolve_voxel_world(std::uintptr_t& world) {
 
 bool actor_frame_matches_active_world(void* actor_frame) {
     if (!actor_frame) return false;
-    const auto& layout = ShroudforgeCompatibility::EnshroudedClient::world_context_layout;
+    const auto& layout = KfcRuntimeCompatibility::EnshroudedClient::world_context_layout;
     std::uintptr_t service_view{}, actor_world{}, active_world{};
     const auto frame = reinterpret_cast<std::uintptr_t>(actor_frame);
     if (!layout.actor_frame_service_view || !layout.service_view_world ||
@@ -141,7 +141,7 @@ std::uintptr_t image_base() { return reinterpret_cast<std::uintptr_t>(GetModuleH
 
 bool native_finish(void* context, bool complete) {
     const auto* profile = find_operation("runtime.world.entity.finish_building");
-    const auto event_rva = ShroudforgeCompatibility::EnshroudedClient::world_finish_event_id_rva;
+    const auto event_rva = KfcRuntimeCompatibility::EnshroudedClient::world_finish_event_id_rva;
     std::uint32_t event_id{};
     const auto base = image_base();
     if (!context || !profile || !profile->available || !event_rva ||
@@ -200,7 +200,7 @@ void execute_entity_request(const std::shared_ptr<EntityRequest>& request, void*
     if (!finish_profile || !finish_profile->available || !actor_frame) { complete_entity_request(request, false); return; }
     const auto frame = reinterpret_cast<std::uintptr_t>(actor_frame);
     if (!actor_frame_matches_active_world(actor_frame)) { complete_entity_request(request, false); return; }
-    const auto& layout = ShroudforgeCompatibility::EnshroudedClient::world_context_layout;
+    const auto& layout = KfcRuntimeCompatibility::EnshroudedClient::world_context_layout;
     const auto native_address = frame + layout.placement_context;
     std::uintptr_t root{}, place_queue{}, remove_queue{}, publish_state{}, publish_commands{};
     std::uint32_t owner{};
@@ -256,7 +256,7 @@ bool invoke_entity_request(const std::shared_ptr<EntityRequest>& request, std::u
 
 bool component_address(std::uintptr_t layout, std::uintptr_t storage, std::uint32_t row,
                        std::uint16_t index, std::uint32_t expected_size, std::uintptr_t& address) {
-    using namespace ShroudforgeCompatibility::EnshroudedClient;
+    using namespace KfcRuntimeCompatibility::EnshroudedClient;
     std::uint64_t bits{};
     std::uint16_t offset{}, stride{};
     if (!layout || !storage || !component_offsets || !component_strides ||
@@ -270,7 +270,7 @@ bool component_address(std::uintptr_t layout, std::uintptr_t storage, std::uint3
 }
 
 bool count_spawn_matches(const EntityRequest& request, std::size_t& matches) {
-    using namespace ShroudforgeCompatibility::EnshroudedClient;
+    using namespace KfcRuntimeCompatibility::EnshroudedClient;
     const auto& components = runtime_components;
     const auto manager = GameThreadDispatcher::EntityManager();
     const auto transform_type = std::find_if(components.begin(), components.end(),
@@ -556,31 +556,31 @@ bool FinishBuilding(bool complete, std::uint32_t* outcome) {
 }
 
 extern "C" {
-bool __cdecl ShroudforgeWorldOperationAvailable(const char* name) { return WorldRuntime::OperationAvailable(name); }
-bool __cdecl ShroudforgeWorldContextActive() { return WorldRuntime::ActiveContextAvailable(); }
-bool __cdecl ShroudforgeWorldEntityContextReady() { return WorldRuntime::EntityContextReady(); }
-bool __cdecl ShroudforgeWorldVoxelRead(const std::int32_t* origin, const std::uint32_t* dimensions,
+bool __cdecl KfcRuntimeWorldOperationAvailable(const char* name) { return WorldRuntime::OperationAvailable(name); }
+bool __cdecl KfcRuntimeWorldContextActive() { return WorldRuntime::ActiveContextAvailable(); }
+bool __cdecl KfcRuntimeWorldEntityContextReady() { return WorldRuntime::EntityContextReady(); }
+bool __cdecl KfcRuntimeWorldVoxelRead(const std::int32_t* origin, const std::uint32_t* dimensions,
     std::uint16_t* values, std::size_t capacity, std::size_t* actual) {
     return WorldRuntime::ReadVoxels(origin, dimensions, values, capacity, actual);
 }
-bool __cdecl ShroudforgeWorldVoxelWrite(const std::int32_t* origin, const std::uint32_t* dimensions,
+bool __cdecl KfcRuntimeWorldVoxelWrite(const std::int32_t* origin, const std::uint32_t* dimensions,
     const std::uint16_t* values, std::size_t count, std::uint32_t* outcome) {
     return WorldRuntime::WriteVoxels(origin, dimensions, values, count, outcome);
 }
-bool __cdecl ShroudforgeWorldEntitySpawn(const std::uint64_t* template_uuid, const double* position,
+bool __cdecl KfcRuntimeWorldEntitySpawn(const std::uint64_t* template_uuid, const double* position,
     const double* rotation, std::uint32_t tracking, std::uint32_t flags,
     std::uint32_t* queue_token, std::uint32_t* outcome) {
     return WorldRuntime::SpawnEntity(template_uuid, position, rotation, tracking, flags, queue_token, outcome);
 }
-bool __cdecl ShroudforgeWorldEntityPlace(const double* position, const double* rotation,
+bool __cdecl KfcRuntimeWorldEntityPlace(const double* position, const double* rotation,
     const float* bounds, std::uint32_t tracking, std::uint32_t feedback, std::uint32_t* outcome) {
     return WorldRuntime::PlaceEntity(position, rotation, bounds, tracking, feedback, outcome);
 }
-bool __cdecl ShroudforgeWorldEntityDestroy(const double* position, const double* rotation,
+bool __cdecl KfcRuntimeWorldEntityDestroy(const double* position, const double* rotation,
     const float* bounds, std::uint32_t tracking, std::uint32_t feedback, std::uint32_t* outcome) {
     return WorldRuntime::DestroyEntity(position, rotation, bounds, tracking, feedback, outcome);
 }
-bool __cdecl ShroudforgeWorldEntityFinishBuilding(bool complete, std::uint32_t* outcome) {
+bool __cdecl KfcRuntimeWorldEntityFinishBuilding(bool complete, std::uint32_t* outcome) {
     return WorldRuntime::FinishBuilding(complete, outcome);
 }
 }

@@ -53,8 +53,8 @@ bool supported_image(std::uint8_t*& base, std::size_t& size) {
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
     const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
     if (nt->Signature != IMAGE_NT_SIGNATURE ||
-        nt->FileHeader.TimeDateStamp != ShroudforgeCompatibility::EnshroudedClient::image_timestamp ||
-        nt->OptionalHeader.SizeOfImage != ShroudforgeCompatibility::EnshroudedClient::image_size) return false;
+        nt->FileHeader.TimeDateStamp != KfcRuntimeCompatibility::EnshroudedClient::image_timestamp ||
+        nt->OptionalHeader.SizeOfImage != KfcRuntimeCompatibility::EnshroudedClient::image_size) return false;
     size = nt->OptionalHeader.SizeOfImage;
     return true;
 }
@@ -227,7 +227,7 @@ void __cdecl capture_entity_manager(void* lookup_context, void*) {
     __try {
         const auto root = *static_cast<std::uintptr_t*>(lookup_context);
         if (!root) return;
-        const auto manager = *reinterpret_cast<std::uintptr_t*>(root + ShroudforgeCompatibility::EnshroudedClient::lookup_manager);
+        const auto manager = *reinterpret_cast<std::uintptr_t*>(root + KfcRuntimeCompatibility::EnshroudedClient::lookup_manager);
         if (manager) {
             if (entity_manager.exchange(manager, std::memory_order_acq_rel) != manager)
                 manager_changes.fetch_add(1, std::memory_order_relaxed);
@@ -312,24 +312,24 @@ bool Initialize() {
     // Drain on the actor-world update entry, which continues while the local
     // actor is active. The prop-system callback is event-driven and can stop
     // being called for long stretches, leaving queued ECS work permanently stale.
-    if (!install_hook(base, ShroudforgeCompatibility::EnshroudedClient::game_thread_signature,
-            ShroudforgeCompatibility::EnshroudedClient::game_thread_original.data(),
-            ShroudforgeCompatibility::EnshroudedClient::game_thread_original.size(),
+    if (!install_hook(base, KfcRuntimeCompatibility::EnshroudedClient::game_thread_signature,
+            KfcRuntimeCompatibility::EnshroudedClient::game_thread_original.data(),
+            KfcRuntimeCompatibility::EnshroudedClient::game_thread_original.size(),
             reinterpret_cast<void*>(&drain)) ||
-        !install_hook(base, ShroudforgeCompatibility::EnshroudedClient::entity_manager_signature,
-            ShroudforgeCompatibility::EnshroudedClient::entity_manager_original.data(),
-            ShroudforgeCompatibility::EnshroudedClient::entity_manager_original.size(),
+        !install_hook(base, KfcRuntimeCompatibility::EnshroudedClient::entity_manager_signature,
+            KfcRuntimeCompatibility::EnshroudedClient::entity_manager_original.data(),
+            KfcRuntimeCompatibility::EnshroudedClient::entity_manager_original.size(),
             reinterpret_cast<void*>(&capture_entity_manager))) {
         Shutdown();
         return false;
     }
-    const bool prop_hook = install_hook(base, ShroudforgeCompatibility::EnshroudedClient::world_prop_update_signature,
-        ShroudforgeCompatibility::EnshroudedClient::world_prop_update_original.data(),
-        ShroudforgeCompatibility::EnshroudedClient::world_prop_update_original.size(),
+    const bool prop_hook = install_hook(base, KfcRuntimeCompatibility::EnshroudedClient::world_prop_update_signature,
+        KfcRuntimeCompatibility::EnshroudedClient::world_prop_update_original.data(),
+        KfcRuntimeCompatibility::EnshroudedClient::world_prop_update_original.size(),
         reinterpret_cast<void*>(&WorldRuntime::OnPropUpdate));
-    const bool placement_hook = install_hook(base, ShroudforgeCompatibility::EnshroudedClient::world_actor_placement_signature,
-        ShroudforgeCompatibility::EnshroudedClient::world_actor_placement_original.data(),
-        ShroudforgeCompatibility::EnshroudedClient::world_actor_placement_original.size(),
+    const bool placement_hook = install_hook(base, KfcRuntimeCompatibility::EnshroudedClient::world_actor_placement_signature,
+        KfcRuntimeCompatibility::EnshroudedClient::world_actor_placement_original.data(),
+        KfcRuntimeCompatibility::EnshroudedClient::world_actor_placement_original.size(),
         reinterpret_cast<void*>(&WorldRuntime::OnActorPlacement));
     entity_context_hooks_ready.store(prop_hook && placement_hook, std::memory_order_release);
     accepting.store(true, std::memory_order_release);
