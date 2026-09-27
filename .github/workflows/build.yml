@@ -1,0 +1,102 @@
+name: Build KFC Runtime
+
+on:
+  push:
+    branches:
+      - "*.*.*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read package version
+        id: version
+        shell: pwsh
+        run: |
+          $cmake = Get-Content -LiteralPath CMakeLists.txt -Raw
+          if ($cmake -notmatch 'project\(kfc-runtime VERSION (\d+\.\d+\.\d+)') {
+            throw 'Could not read the KFC Runtime version from CMakeLists.txt.'
+          }
+          "value=$($Matches[1])" >> $env:GITHUB_OUTPUT
+
+      - name: Configure Windows x64 build
+        run: cmake -S . -B build -A x64
+
+      - name: Build Runtime and Development packages
+        run: cmake --build build --config Release --target package
+
+      - name: Validate profile and exported SDK
+        shell: pwsh
+        run: |
+          build\Release\kfc-runtime-dev.exe validate-profile profiles\enshrouded\client\1076226.json
+          if ($LASTEXITCODE -ne 0) { throw 'The approved Enshrouded profile failed validation.' }
+
+          build\Release\kfc-runtime-dev.exe inspect-provider build\Release\kfc-runtime.dll --out build\provider-check.json
+          if ($LASTEXITCODE -ne 0) { throw 'The Runtime provider failed its ABI/export check.' }
+
+          $api = Get-Content -LiteralPath sdk\runtime-api.json -Raw | ConvertFrom-Json
+          $report = Get-Content -LiteralPath build\provider-check.json -Raw | ConvertFrom-Json
+          if ($report.providerAbi -ne $api.providerAbi -or $report.expectedAbi -ne $api.providerAbi) {
+            throw "ABI mismatch: inventory=$($api.providerAbi), provider=$($report.providerAbi), expected=$($report.expectedAbi)."
+          }
+          if (@($report.exports | Where-Object { -not $_.present }).Count -gt 0) {
+            throw 'The Runtime DLL is missing one or more declared SDK exports.'
+          }
+
+          $header = Get-Content -LiteralPath include\kfc_runtime\runtime.h -Raw
+          $declared = @($api.providerExports + $api.ecsExports + $api.worldExports + $api.patchExports | ForEach-Object name | Sort-Object -Unique)
+          $missing = @($declared | Where-Object { $header -notmatch ('\b' + [regex]::Escape($_) + '\s*\(') })
+          if ($missing.Count -gt 0) { throw "SDK header is missing: $($missing -join ', ')" }
+
+      - name: Create SHA-256 checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem -LiteralPath build -Filter 'kfc-runtime-*-windows-x64-*.zip' | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)" | Set-Content -LiteralPath "$($_.FullName).sha256" -Encoding ascii
+          }
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kfc-runtime-${{ steps.version.outputs.value }}-${{ github.run_id }}
+          path: |
+            build/kfc-runtime-*-windows-x64-*.zip
+            build/kfc-runtime-*-windows-x64-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish development prerelease
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.value }}-dev.${{ github.run_id }}
+          name: KFC Runtime ${{ steps.version.outputs.value }} Dev ${{ github.run_id }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            build/kfc-runtime-*-windows-x64-*.zip
+            build/kfc-runtime-*-windows-x64-*.zip.sha256
+          generate_release_notes: true
+          prerelease: true
+          make_latest: false
+
+      - name: Publish release build
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.value }}-build.${{ github.run_id }}
+          name: KFC Runtime ${{ steps.version.outputs.value }} Build ${{ github.run_id }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            build/kfc-runtime-*-windows-x64-*.zip
+            build/kfc-runtime-*-windows-x64-*.zip.sha256
+          generate_release_notes: true
+          prerelease: false
+          make_latest: true

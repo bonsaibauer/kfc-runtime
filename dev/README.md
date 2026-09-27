@@ -61,13 +61,14 @@ cmake --build build --config Release --target package
 The generated ZIP packages are under `build/`. To stage only the runtime SDK:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix out\runtime
+cmake --install build --config Release --component Runtime --prefix out\runtime-sdk
 ```
 
-The modloader ships `out\runtime\bin\kfc-runtime.dll` with its game integration
-and uses the installed public header as the ABI contract. It can consume a
-versioned Runtime ZIP or pin this repository as a Git submodule at a release
-commit. The modloader should not keep another copy of `src/windows/`.
+The modloader ships `out\runtime-sdk\bin\kfc-runtime.dll` with its game
+integration and uses the installed public header as the ABI contract. The API
+inventory is installed at `out\runtime-sdk\share\kfc-runtime\sdk\runtime-api.json`.
+It can consume a versioned Runtime ZIP or pin this repository as a Git submodule
+at a release commit. The modloader should not keep another copy of `src/windows/`.
 
 ## Runtime profiles
 

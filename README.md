@@ -49,6 +49,17 @@ The Runtime and Development ZIPs are written to `build/`. The current provider
 supports Enshrouded client build `1076226`; other games and builds require an
 approved profile and verified runtime support.
 
+To stage only the files a modloader integrates, install the Runtime component
+to the ignored local output directory:
+
+```powershell
+cmake --install build --config Release --component Runtime --prefix out/runtime-sdk
+```
+
+This staging tree contains the DLL, import library, SDK header, API inventory,
+and supporting documentation. The distributable ZIP remains the Runtime
+package in `build/`; `out/runtime-sdk/` is generated output and is not committed.
+
 ## Develop a profile
 
 Profile creation is a maintainer workflow; it does not run when players start
@@ -62,3 +73,10 @@ The C ABI version is checked with `KfcRuntimeAbi`. ABI-breaking changes increase
 the ABI and package major version. Game profiles are selected by executable
 identity and are released with the provider that embeds them. Modloaders should
 pin a KFC Runtime release or a specific repository commit.
+
+## Automated builds and releases
+
+The [GitHub Actions build workflow](.github/workflows/build.yml) builds and
+validates both packages on pull requests. A push to a version branch publishes
+a development prerelease. Running the workflow manually publishes a release
+build. Both channels attach the Runtime and Development ZIPs with SHA-256 files.
