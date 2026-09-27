@@ -147,7 +147,12 @@ install(TARGETS kfc-runtime-dev kfc-runtime-capture-ecs
 install(DIRECTORY profiles/ DESTINATION share/kfc-runtime/profiles COMPONENT Development)
 install(DIRECTORY dev/function-catalogs/ DESTINATION share/kfc-runtime/dev/function-catalogs COMPONENT Development)
 install(DIRECTORY dev/schemas/ DESTINATION share/kfc-runtime/dev/schemas COMPONENT Development)
-install(FILES docs/Architecture.md docs/Profiles.md DESTINATION share/kfc-runtime/docs COMPONENT Development)
+install(FILES README.md DESTINATION share/kfc-runtime COMPONENT Development)
+install(FILES include/kfc_runtime/runtime.h DESTINATION include/kfc_runtime COMPONENT Development)
+install(FILES sdk/runtime-api.json DESTINATION share/kfc-runtime/sdk COMPONENT Development)
+install(FILES dev/README.md DESTINATION share/kfc-runtime/dev COMPONENT Development)
+install(FILES docs/SDK.md docs/Architecture.md docs/Profiles.md
+    DESTINATION share/kfc-runtime/docs COMPONENT Development)
 install(FILES dev/tools/enshrouded/run-live-component-registry-audit.ps1
     DESTINATION share/kfc-runtime/dev/tools/enshrouded COMPONENT Development)
 
