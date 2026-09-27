@@ -39,6 +39,13 @@ accepts a patch only when its signature matches exactly once, and diagnostics
 include the match count and target RVA so a known operation can be checked
 against the installed executable.
 
+The ECS diagnostic also records each live entity's template UUID/name alongside
+that archetype's component indices, strides and offsets. These rows can be
+joined to extracted `TemplateResource` assets by UUID; this supplies per-template
+constraints for resolving same-size component types without relying on serialized
+component order. The snapshot is diagnostic evidence, not an automatic index
+assignment when multiple mappings still fit.
+
 Hooks retain published trampoline memory and pin this DLL until process exit.
 Shutdown stops admission and attempts to restore original code without
 freeing return addresses that may still be on engine thread stacks. Runtime

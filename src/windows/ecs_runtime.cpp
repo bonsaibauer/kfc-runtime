@@ -49,9 +49,18 @@ struct EntityView {
     std::uintptr_t pointer{};
     std::uintptr_t layout{};
     std::uintptr_t storage{};
+    std::uintptr_t definition{};
     std::uint32_t row{};
     std::uint32_t id{};
     std::uint32_t generation{};
+};
+struct ComponentSlot { std::uint16_t index{}, stride{}, offset{}; };
+struct TemplateLayoutSample {
+    std::uint64_t uuid[2]{};
+    std::uintptr_t layout{};
+    std::string name;
+    std::uint64_t entity_count{};
+    std::vector<ComponentSlot> components;
 };
 struct HandleRecord {
     std::uint32_t id{};
@@ -65,6 +74,9 @@ std::unordered_map<std::string, ComponentType> types;
 std::unordered_map<std::string, std::uint32_t> configured_types;
 std::unordered_map<std::uint32_t, std::unordered_set<std::uint16_t>> observed_indices_by_size;
 std::unordered_set<std::uintptr_t> discovered_layouts;
+std::unordered_map<std::uintptr_t, std::vector<ComponentSlot>> discovered_layout_components;
+std::unordered_map<std::string, TemplateLayoutSample> template_layout_samples;
+std::uint64_t template_layout_samples_dropped{};
 std::vector<std::uintptr_t> discovery_entities;
 std::size_t discovery_cursor{};
 std::uintptr_t discovery_table{};
@@ -168,11 +180,13 @@ bool entity_pointers(const ResolvedLayout& layout, std::vector<std::uintptr_t>& 
 }
 bool entity_view(std::uintptr_t pointer, const ResolvedLayout& layout, EntityView& entity) {
     entity.pointer = pointer;
-    return pointer && read(pointer + layout.entity_layout, entity.layout) && entity.layout &&
-        read(pointer + layout.entity_storage, entity.storage) && entity.storage &&
-        read(pointer + layout.entity_row, entity.row) && entity.row <= (1u << 24) &&
-        read(pointer + layout.entity_id, entity.id) && entity.id &&
-        read(pointer + layout.entity_generation, entity.generation);
+    if (!pointer || !read(pointer + layout.entity_layout, entity.layout) || !entity.layout ||
+        !read(pointer + layout.entity_storage, entity.storage) || !entity.storage ||
+        !read(pointer + layout.entity_row, entity.row) || entity.row > (1u << 24) ||
+        !read(pointer + layout.entity_id, entity.id) || !entity.id ||
+        !read(pointer + layout.entity_generation, entity.generation)) return false;
+    read(pointer + ShroudforgeCompatibility::EnshroudedClient::entity_definition, entity.definition);
+    return true;
 }
 bool component_address(const EntityView& entity, const ResolvedLayout& layout,
                        const ComponentType& component, std::uintptr_t& address) {
@@ -456,6 +470,9 @@ void reset_component_discovery() {
     std::scoped_lock lock(discovery_mutex);
     observed_indices_by_size.clear();
     discovered_layouts.clear();
+    discovered_layout_components.clear();
+    template_layout_samples.clear();
+    template_layout_samples_dropped = 0;
     discovery_entities.clear();
     discovery_cursor = 0;
     discovery_table = 0;
@@ -466,16 +483,58 @@ void reset_component_discovery() {
     discovery_complete = false;
 }
 
-void collect_layout_component_candidates(const EntityView& entity, const ResolvedLayout& layout) {
+bool collect_layout_component_candidates(const EntityView& entity, const ResolvedLayout& layout,
+                                         std::vector<ComponentSlot>& components) {
     std::uint64_t component_bits[16]{};
-    if (!read_bytes(entity.layout + layout.component_bits, component_bits, sizeof(component_bits))) return;
+    if (!read_bytes(entity.layout + layout.component_bits, component_bits, sizeof(component_bits))) return false;
     for (std::size_t index = 0; index < max_components; ++index) {
         if (!(component_bits[index / 64] & (std::uint64_t{1} << (index % 64)))) continue;
-        std::uint16_t stride{};
-        if (!read(entity.layout + layout.component_strides + index * sizeof(stride), stride) || !stride) continue;
+        std::uint16_t stride{}, offset{};
+        if (!read(entity.layout + layout.component_strides + index * sizeof(stride), stride) || !stride ||
+            !read(entity.layout + layout.component_offsets + index * sizeof(offset), offset)) continue;
         observed_indices_by_size[stride].insert(static_cast<std::uint16_t>(index));
+        components.push_back({static_cast<std::uint16_t>(index), stride, offset});
     }
     ++discovery_layout_count;
+    return true;
+}
+
+void collect_template_layout_sample(const EntityView& entity,
+                                    const std::vector<ComponentSlot>& components) {
+    using namespace ShroudforgeCompatibility::EnshroudedClient;
+    if (!entity.definition) return;
+    struct DefinitionHeader {
+        std::uint64_t uuid[2]{};
+        std::uintptr_t name{};
+        std::uint64_t name_size{};
+    } definition{};
+    if (!read_bytes(entity.definition + definition_uuid, definition.uuid, sizeof(definition.uuid)) ||
+        !read(entity.definition + definition_name, definition.name) || !definition.name ||
+        !read(entity.definition + definition_name_size, definition.name_size) ||
+        !definition.name_size || definition.name_size > 128) return;
+    std::string name(static_cast<std::size_t>(definition.name_size), '\0');
+    if (!read_bytes(definition.name, name.data(), name.size())) return;
+    if (const auto end = name.find('\0'); end != std::string::npos) name.resize(end);
+    if (name.empty()) return;
+
+    std::string key(sizeof(definition.uuid) + sizeof(entity.layout), '\0');
+    std::memcpy(key.data(), definition.uuid, sizeof(definition.uuid));
+    std::memcpy(key.data() + sizeof(definition.uuid), &entity.layout, sizeof(entity.layout));
+    auto found = template_layout_samples.find(key);
+    if (found == template_layout_samples.end()) {
+        constexpr std::size_t max_template_layout_samples = 4096;
+        if (template_layout_samples.size() >= max_template_layout_samples) {
+            ++template_layout_samples_dropped;
+            return;
+        }
+        TemplateLayoutSample sample{};
+        std::memcpy(sample.uuid, definition.uuid, sizeof(sample.uuid));
+        sample.layout = entity.layout;
+        sample.name = std::move(name);
+        sample.components = components;
+        found = template_layout_samples.emplace(std::move(key), std::move(sample)).first;
+    }
+    ++found->second.entity_count;
 }
 
 void publish_discovered_component_indices() {
@@ -549,9 +608,15 @@ void component_discovery_tick(std::uintptr_t manager) {
     const auto end = (std::min)(discovery_cursor + entities_per_tick, discovery_entities.size());
     for (; discovery_cursor < end; ++discovery_cursor) {
         EntityView entity{};
-        if (!entity_view(discovery_entities[discovery_cursor], layout, entity) ||
-            !discovered_layouts.insert(entity.layout).second) continue;
-        collect_layout_component_candidates(entity, layout);
+        if (!entity_view(discovery_entities[discovery_cursor], layout, entity)) continue;
+        auto components = discovered_layout_components.find(entity.layout);
+        if (components == discovered_layout_components.end()) {
+            std::vector<ComponentSlot> discovered_components;
+            if (!collect_layout_component_candidates(entity, layout, discovered_components)) continue;
+            discovered_layouts.insert(entity.layout);
+            components = discovered_layout_components.emplace(entity.layout, std::move(discovered_components)).first;
+        }
+        collect_template_layout_sample(entity, components->second);
     }
     discovery_scanned_entities += end - begin;
     if (discovery_cursor >= discovery_entities.size()) {
@@ -632,6 +697,7 @@ std::string Status() {
          << " component_index_discovery=" << (discovery_complete ? "complete" : "scanning")
          << '(' << discovery_cursor << '/' << discovery_entities.size()
          << ",layouts=" << discovered_layouts.size()
+         << ",templates=" << template_layout_samples.size()
          << ",restarts=" << discovery_restarts << ')'
          << " profile=" << ShroudforgeCompatibility::EnshroudedClient::status
          << " game_thread=" << GameThreadDispatcher::Status();
@@ -660,6 +726,7 @@ std::string Diagnostics() {
     nlohmann::json resolved_mappings = nlohmann::json::array();
     nlohmann::json unresolved_types = nlohmann::json::array();
     nlohmann::json stride_candidates = nlohmann::json::array();
+    nlohmann::json template_layouts = nlohmann::json::array();
     nlohmann::json world_operations = nlohmann::json::object();
     for (const auto& operation : ShroudforgeCompatibility::EnshroudedClient::runtime_operations)
         world_operations[operation.name] = {{"available", operation.available}, {"status", operation.status},
@@ -693,6 +760,16 @@ std::string Diagnostics() {
             unresolved_types.push_back({{"name",name},{"size",size},{"reason",reason}});
         }
     }
+    for (const auto& [key, sample] : template_layout_samples) {
+        (void)key;
+        nlohmann::json component_slots = nlohmann::json::array();
+        for (const auto& component : sample.components)
+            component_slots.push_back({{"index", component.index}, {"stride", component.stride},
+                {"offset", component.offset}});
+        template_layouts.push_back({{"templateUuidQwords", {sample.uuid[0], sample.uuid[1]}},
+            {"templateName", sample.name},
+            {"entitiesSeen", sample.entity_count}, {"componentSlots", std::move(component_slots)}});
+    }
     return nlohmann::json({
         {"schemaVersion",1}, {"providerAbi",4},
         {"profile",ShroudforgeCompatibility::EnshroudedClient::status},
@@ -717,6 +794,8 @@ std::string Diagnostics() {
             {"snapshotRestarts",discovery_restarts},
             {"observedStrideBuckets",observed_indices_by_size.size()},
             {"observedIndexCandidates",observed_indices},
+            {"templateLayoutSamples",std::move(template_layouts)},
+            {"templateLayoutSamplesDropped",template_layout_samples_dropped},
             {"mappingMethod","exact profile entries plus unique reflected size and unique live archetype stride"},
             {"resolved",std::move(resolved_mappings)},
             {"unresolved",std::move(unresolved_types)},

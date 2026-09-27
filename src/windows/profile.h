@@ -22,12 +22,15 @@ struct RuntimeWorldContextLayout {
 };
 struct RuntimePatch {
     std::string name, signature, kind;
+    std::string function_id;
     std::vector<std::uint8_t> payload;
-    std::size_t overwrite{}, return_rel32_offset{};
+    std::uintptr_t function_begin_rva{}, function_end_rva{};
+    std::size_t overwrite{}, return_rel32_offset{}, target_offset{};
 };
 inline std::uint32_t image_timestamp{}, image_size{};
 inline std::size_t entity_manager_count{}, entity_manager_table{}, component_offsets{}, component_strides{};
-inline std::size_t entity_id{}, entity_generation{}, entity_layout{}, entity_storage{}, entity_row{}, component_bits{}, lookup_manager{};
+inline std::size_t entity_id{}, entity_generation{}, entity_layout{}, entity_storage{}, entity_definition{}, entity_row{}, component_bits{}, lookup_manager{};
+inline std::size_t definition_uuid{}, definition_name{}, definition_name_size{};
 inline std::string game_thread_signature, entity_manager_signature, status{"not-initialized"};
 inline std::string world_prop_update_signature, world_actor_placement_signature;
 inline std::vector<std::uint8_t> game_thread_original, entity_manager_original;

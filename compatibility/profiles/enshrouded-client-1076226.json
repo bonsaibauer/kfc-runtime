@@ -16,9 +16,15 @@
     "entity_generation": 20,
     "entity_layout": 24,
     "entity_storage": 32,
+    "entity_definition": 40,
     "entity_row": 48,
     "component_bits": 0,
     "lookup_manager": 48
+  },
+  "entityDefinition": {
+    "uuid": 0,
+    "name": 16,
+    "nameSize": 24
   },
   "hooks": {
     "game_thread": {
@@ -198,6 +204,7 @@
   },
   "runtimePatches": {
     "runtime.patch.no_fall_damage": {
+      "function": {"id": "patch_owner.no_fall_damage", "beginRva": 2302926, "endRva": 2303903, "targetOffset": 468},
       "signature": "45 89 0C 88 48 8B CB",
       "kind": "detour",
       "overwriteBytes": 7,
@@ -205,6 +212,7 @@
       "returnRel32Offset": 8
     },
     "runtime.patch.no_stamina_loss": {
+      "function": {"id": "patch_owner.no_stamina_loss", "beginRva": 2309284, "endRva": 2317879, "targetOffset": 1450},
       "signature": "8B 04 91 89 44 24 40",
       "kind": "detour",
       "overwriteBytes": 7,
@@ -212,6 +220,7 @@
       "returnRel32Offset": 17
     },
     "runtime.patch.unlimited_flight": {
+      "function": {"id": "patch_owner.unlimited_flight", "beginRva": 2271259, "endRva": 2289472, "targetOffset": 1990},
       "signature": "F3 0F 10 05 ?? ?? ?? ?? F2 0F 11 4C",
       "kind": "detour",
       "overwriteBytes": 8,
@@ -219,13 +228,22 @@
       "returnRel32Offset": 9
     },
     "runtime.patch.no_resource_cost": {
+      "function": {"id": "patch_owner.no_resource_cost", "beginRva": 3678896, "endRva": 3679006, "targetOffset": 33},
       "signature": "44 8B A5 08 01 00 00 4C 8B F9",
       "kind": "detour",
       "overwriteBytes": 7,
       "payload": [65, 188, 0, 0, 0, 0, 233, 0, 0, 0, 0],
       "returnRel32Offset": 7
     },
+    "runtime.patch.infinite_item_split": {
+      "function": {"id": "patch_owner.infinite_item_split", "beginRva": 3712372, "endRva": 3712389, "targetOffset": 0},
+      "signature": "29 6E 04 EB C5",
+      "kind": "bytes",
+      "overwriteBytes": 3,
+      "payload": [144, 144, 144]
+    },
     "runtime.patch.infinite_item_use": {
+      "function": {"id": "patch_owner.infinite_item_use", "beginRva": 3692729, "endRva": 3693862, "targetOffset": 881},
       "signature": "0F B6 85 ?? ?? 00 00 48 8D 4C 24 40 88 44 24 30 44 8B CE 8B 85 ?? ?? 00 00 4C 8B C3",
       "kind": "bytes",
       "overwriteBytes": 7,
@@ -257,6 +275,11 @@
       "name": "keen::ecs::ActorInput",
       "index": 4,
       "size": 440
+    },
+    {
+      "name": "keen::ecs::ActorRotation",
+      "index": 5,
+      "size": 96
     },
     {
       "name": "keen::ecs::AddDestructibleOnLoot",
@@ -324,6 +347,11 @@
       "size": 28
     },
     {
+      "name": "keen::ecs::AnimationGraphResourceComponent2",
+      "index": 19,
+      "size": 36
+    },
+    {
       "name": "keen::ecs::AnimationGraphSlotComponent",
       "index": 20,
       "size": 1732
@@ -332,6 +360,11 @@
       "name": "keen::ecs::Ao",
       "index": 21,
       "size": 1
+    },
+    {
+      "name": "keen::ecs::ArachnophobiaModelToggle",
+      "index": 22,
+      "size": 16
     },
     {
       "name": "keen::ecs::Armor",
@@ -372,6 +405,11 @@
       "name": "keen::ecs::BaseIdComponent",
       "index": 30,
       "size": 48
+    },
+    {
+      "name": "keen::ecs::BaseShared",
+      "index": 31,
+      "size": 1
     },
     {
       "name": "keen::ecs::Block",
@@ -464,6 +502,11 @@
       "size": 40
     },
     {
+      "name": "keen::ecs::CheckLineAboveSensor",
+      "index": 50,
+      "size": 4
+    },
+    {
       "name": "keen::ecs::CheckPlayerInRange",
       "index": 51,
       "size": 1
@@ -492,6 +535,11 @@
       "name": "keen::ecs::ClientAnimationGraphInputLerp",
       "index": 56,
       "size": 968
+    },
+    {
+      "name": "keen::ecs::ClientAttachCursorOnHover",
+      "index": 57,
+      "size": 40
     },
     {
       "name": "keen::ecs::ClientBaseIdComponent",
@@ -532,6 +580,11 @@
       "name": "keen::ecs::ClientCycleInventoryStock",
       "index": 65,
       "size": 4
+    },
+    {
+      "name": "keen::ecs::ClientDismantleOverride",
+      "index": 66,
+      "size": 2
     },
     {
       "name": "keen::ecs::ClientDissolve",
@@ -577,6 +630,11 @@
       "name": "keen::ecs::ClientHookShot",
       "index": 75,
       "size": 40
+    },
+    {
+      "name": "keen::ecs::ClientInteractionCamera",
+      "index": 76,
+      "size": 1
     },
     {
       "name": "keen::ecs::ClientInteractionLock",
@@ -684,6 +742,16 @@
       "size": 24
     },
     {
+      "name": "keen::ecs::ColliderResourceComponent",
+      "index": 98,
+      "size": 8
+    },
+    {
+      "name": "keen::ecs::CollisionFeedbackMaterialComponent",
+      "index": 99,
+      "size": 44
+    },
+    {
       "name": "keen::ecs::ColorPaletteItem",
       "index": 100,
       "size": 4
@@ -712,6 +780,11 @@
       "name": "keen::ecs::Comfort",
       "index": 105,
       "size": 40
+    },
+    {
+      "name": "keen::ecs::ComfortProvider",
+      "index": 106,
+      "size": 16
     },
     {
       "name": "keen::ecs::ComfortQuery",
@@ -754,8 +827,18 @@
       "size": 1
     },
     {
+      "name": "keen::ecs::CopyParentActorStates",
+      "index": 115,
+      "size": 8
+    },
+    {
       "name": "keen::ecs::CopyParentAnimationGraphState",
       "index": 116,
+      "size": 1
+    },
+    {
+      "name": "keen::ecs::CopyParentDamageSusceptibility",
+      "index": 117,
       "size": 1
     },
     {
@@ -841,6 +924,11 @@
     {
       "name": "keen::ecs::DynamicDangerSensor",
       "index": 134,
+      "size": 8
+    },
+    {
+      "name": "keen::ecs::DangerousArea",
+      "index": 135,
       "size": 8
     },
     {
@@ -964,6 +1052,11 @@
       "size": 40
     },
     {
+      "name": "keen::ecs::EnemyArsenalReference",
+      "index": 160,
+      "size": 16
+    },
+    {
       "name": "keen::ecs::DynamicEnemyAttackAttachment",
       "index": 161,
       "size": 1
@@ -999,6 +1092,11 @@
       "size": 40
     },
     {
+      "name": "keen::ecs::EnemyProjectileBehavior",
+      "index": 168,
+      "size": 116
+    },
+    {
       "name": "keen::ecs::DynamicEnemyScaling",
       "index": 169,
       "size": 40
@@ -1017,6 +1115,11 @@
       "name": "keen::ecs::EnemySignalBehavior",
       "index": 172,
       "size": 32
+    },
+    {
+      "name": "keen::ecs::EnemySpawnerClient",
+      "index": 173,
+      "size": 1
     },
     {
       "name": "keen::ecs::EnemySteeringTest",
@@ -1039,6 +1142,11 @@
       "size": 8
     },
     {
+      "name": "keen::ecs::EnergyProvider",
+      "index": 178,
+      "size": 4
+    },
+    {
       "name": "keen::ecs::EnergyQuery",
       "index": 179,
       "size": 12
@@ -1047,6 +1155,11 @@
       "name": "keen::ecs::EnergyWaterwheel",
       "index": 180,
       "size": 8
+    },
+    {
+      "name": "keen::ecs::EnergyWindmill",
+      "index": 181,
+      "size": 1
     },
     {
       "name": "keen::ecs::EntityAnimation",
@@ -1062,6 +1175,11 @@
       "name": "keen::ecs::EntityAttachment",
       "index": 184,
       "size": 44
+    },
+    {
+      "name": "keen::ecs::EntityTagContainer",
+      "index": 185,
+      "size": 8
     },
     {
       "name": "keen::ecs::EnvironmentSensor",
@@ -1124,6 +1242,11 @@
       "size": 16
     },
     {
+      "name": "keen::ecs::FakePlayerSpawner",
+      "index": 198,
+      "size": 16
+    },
+    {
       "name": "keen::ecs::DynamicFallDamage",
       "index": 199,
       "size": 16
@@ -1134,6 +1257,16 @@
       "size": 1
     },
     {
+      "name": "keen::ecs::Fishable",
+      "index": 201,
+      "size": 64
+    },
+    {
+      "name": "keen::ecs::Fishing",
+      "index": 202,
+      "size": 32
+    },
+    {
       "name": "keen::ecs::FishingEndurance",
       "index": 203,
       "size": 52
@@ -1142,6 +1275,11 @@
       "name": "keen::ecs::FishingRodRender",
       "index": 204,
       "size": 1
+    },
+    {
+      "name": "keen::ecs::FishingSpot",
+      "index": 205,
+      "size": 20
     },
     {
       "name": "keen::ecs::FishingStrength",
@@ -1159,6 +1297,16 @@
       "size": 32
     },
     {
+      "name": "keen::ecs::FlyingEnemy",
+      "index": 209,
+      "size": 56
+    },
+    {
+      "name": "keen::ecs::FogOfWarDiscovery",
+      "index": 210,
+      "size": 4
+    },
+    {
       "name": "keen::ecs::FogRemovalIdComponent",
       "index": 211,
       "size": 4
@@ -1172,6 +1320,11 @@
       "name": "keen::ecs::FogResistanceState",
       "index": 213,
       "size": 4
+    },
+    {
+      "name": "keen::ecs::FoodBait",
+      "index": 214,
+      "size": 1
     },
     {
       "name": "keen::ecs::ForceSave",
@@ -1199,6 +1352,11 @@
       "size": 44
     },
     {
+      "name": "keen::ecs::FuelCraftingStock",
+      "index": 220,
+      "size": 1
+    },
+    {
       "name": "keen::ecs::FuelPercentageInit",
       "index": 221,
       "size": 4
@@ -1207,6 +1365,11 @@
       "name": "keen::ecs::DynamicFuelSetup",
       "index": 222,
       "size": 4
+    },
+    {
+      "name": "keen::ecs::GliderUpstreamZone",
+      "index": 223,
+      "size": 1
     },
     {
       "name": "keen::ecs::GrassEffector",
@@ -1222,6 +1385,11 @@
       "name": "keen::ecs::DynamicGrowth",
       "index": 226,
       "size": 16
+    },
+    {
+      "name": "keen::ecs::GrowthHint",
+      "index": 227,
+      "size": 1
     },
     {
       "name": "keen::ecs::HardLockTarget",
@@ -1299,6 +1467,16 @@
       "size": 168
     },
     {
+      "name": "keen::ecs::HookShotAnchor",
+      "index": 243,
+      "size": 16
+    },
+    {
+      "name": "keen::ecs::HookShotAnchorSubEntity",
+      "index": 244,
+      "size": 56
+    },
+    {
       "name": "keen::ecs::HookShotTargeting",
       "index": 245,
       "size": 160
@@ -1307,6 +1485,11 @@
       "name": "keen::ecs::Impact",
       "index": 246,
       "size": 20
+    },
+    {
+      "name": "keen::ecs::ImpactConfiguration",
+      "index": 247,
+      "size": 72
     },
     {
       "name": "keen::ecs::ImpactDirection",
@@ -1389,6 +1572,11 @@
       "size": 20
     },
     {
+      "name": "keen::ecs::InteractionToggle",
+      "index": 264,
+      "size": 64
+    },
+    {
       "name": "keen::ecs::Inventory",
       "index": 265,
       "size": 96
@@ -1469,6 +1657,11 @@
       "size": 128
     },
     {
+      "name": "keen::ecs::KnowledgeTriggerOnKill",
+      "index": 281,
+      "size": 104
+    },
+    {
       "name": "keen::ecs::KnowledgeTriggerRange",
       "index": 282,
       "size": 1
@@ -1482,6 +1675,11 @@
       "name": "keen::ecs::KnowledgeUiWorldEvent",
       "index": 284,
       "size": 16
+    },
+    {
+      "name": "keen::ecs::Ladder",
+      "index": 285,
+      "size": 36
     },
     {
       "name": "keen::ecs::LastEnemyValue",
@@ -1509,9 +1707,54 @@
       "size": 44
     },
     {
+      "name": "keen::ecs::LifeCondition",
+      "index": 291,
+      "size": 24
+    },
+    {
       "name": "keen::ecs::LifeTime",
       "index": 292,
       "size": 24
+    },
+    {
+      "name": "keen::ecs::LinkClientToggleStateToParentToggleState",
+      "index": 293,
+      "size": 1
+    },
+    {
+      "name": "keen::ecs::LinkToggleStateToEnemyPhase",
+      "index": 294,
+      "size": 20
+    },
+    {
+      "name": "keen::ecs::LinkToggleStateToParentEnemyPhase",
+      "index": 295,
+      "size": 20
+    },
+    {
+      "name": "keen::ecs::LinkToggleStateToParentSignalState",
+      "index": 296,
+      "size": 20
+    },
+    {
+      "name": "keen::ecs::LinkToggleStateToParentToggleState",
+      "index": 297,
+      "size": 1
+    },
+    {
+      "name": "keen::ecs::LinkToggleStateToSignalState",
+      "index": 298,
+      "size": 20
+    },
+    {
+      "name": "keen::ecs::LocaTagComponent",
+      "index": 299,
+      "size": 16
+    },
+    {
+      "name": "keen::ecs::LocalSignalReceiver",
+      "index": 300,
+      "size": 16
     },
     {
       "name": "keen::ecs::Location",
@@ -1529,6 +1772,11 @@
       "size": 8
     },
     {
+      "name": "keen::ecs::LoreReading",
+      "index": 304,
+      "size": 80
+    },
+    {
       "name": "keen::ecs::LoreVoiceoverState",
       "index": 305,
       "size": 32
@@ -1537,6 +1785,11 @@
       "name": "keen::ecs::MagicDamageMod",
       "index": 306,
       "size": 68
+    },
+    {
+      "name": "keen::ecs::MagicalBarrier",
+      "index": 307,
+      "size": 1
     },
     {
       "name": "keen::ecs::MagicalBarrierConnection",
@@ -1589,6 +1842,11 @@
       "size": 3
     },
     {
+      "name": "keen::ecs::MiningNodeKnowledge",
+      "index": 318,
+      "size": 24
+    },
+    {
       "name": "keen::ecs::ModelComponent",
       "index": 319,
       "size": 4
@@ -1596,6 +1854,16 @@
     {
       "name": "keen::ecs::ModelDynamic",
       "index": 320,
+      "size": 16
+    },
+    {
+      "name": "keen::ecs::ModelRenderHint",
+      "index": 321,
+      "size": 2
+    },
+    {
+      "name": "keen::ecs::ModelResource",
+      "index": 322,
       "size": 16
     },
     {
@@ -1622,6 +1890,11 @@
       "name": "keen::ecs::MovementVector",
       "index": 327,
       "size": 24
+    },
+    {
+      "name": "keen::ecs::MovingPlatform",
+      "index": 328,
+      "size": 1
     },
     {
       "name": "keen::ecs::MultiSignalReceiver",
@@ -1779,9 +2052,19 @@
       "size": 1
     },
     {
+      "name": "keen::ecs::NoBuildZone",
+      "index": 360,
+      "size": 1
+    },
+    {
       "name": "keen::ecs::DynamicNonModalHint",
       "index": 361,
       "size": 8
+    },
+    {
+      "name": "keen::ecs::NpcActionSequences",
+      "index": 362,
+      "size": 32
     },
     {
       "name": "keen::ecs::NpcCommon",
@@ -1884,6 +2167,16 @@
       "size": 8
     },
     {
+      "name": "keen::ecs::ParentTargets",
+      "index": 383,
+      "size": 1
+    },
+    {
+      "name": "keen::ecs::ParriableProjectile",
+      "index": 384,
+      "size": 24
+    },
+    {
       "name": "keen::ecs::ParriedProjectile",
       "index": 385,
       "size": 8
@@ -1927,6 +2220,11 @@
       "name": "keen::ecs::PerkContainerNew",
       "index": 393,
       "size": 2
+    },
+    {
+      "name": "keen::ecs::PhysicsUpdate",
+      "index": 394,
+      "size": 12
     },
     {
       "name": "keen::ecs::PickingTarget",
@@ -2079,9 +2377,19 @@
       "size": 1
     },
     {
+      "name": "keen::ecs::RandomLootProbability",
+      "index": 425,
+      "size": 4
+    },
+    {
       "name": "keen::ecs::RandomLootSlotCount",
       "index": 426,
       "size": 2
+    },
+    {
+      "name": "keen::ecs::RandomOrientation",
+      "index": 427,
+      "size": 28
     },
     {
       "name": "keen::ecs::DynamicRandomSpawner",
@@ -2124,6 +2432,11 @@
       "size": 32
     },
     {
+      "name": "keen::ecs::RemoveFog",
+      "index": 436,
+      "size": 1
+    },
+    {
       "name": "keen::ecs::RemoveInteractionOnEmptyInventory",
       "index": 437,
       "size": 1
@@ -2144,9 +2457,24 @@
       "size": 176
     },
     {
+      "name": "keen::ecs::RequiredCraftingProp",
+      "index": 441,
+      "size": 20
+    },
+    {
+      "name": "keen::ecs::ResourceNodePickupDrops",
+      "index": 442,
+      "size": 60
+    },
+    {
       "name": "keen::ecs::Rested",
       "index": 443,
       "size": 48
+    },
+    {
+      "name": "keen::ecs::Resting",
+      "index": 444,
+      "size": 40
     },
     {
       "name": "keen::ecs::Revive",
@@ -2192,6 +2520,11 @@
       "name": "keen::ecs::SelectedTargets",
       "index": 453,
       "size": 2184
+    },
+    {
+      "name": "keen::ecs::SendToggleStateToParentToggleState",
+      "index": 454,
+      "size": 1
     },
     {
       "name": "keen::ecs::SequenceEventCollider",
@@ -2279,6 +2612,11 @@
       "size": 32
     },
     {
+      "name": "keen::ecs::ServerTarget",
+      "index": 472,
+      "size": 8
+    },
+    {
       "name": "keen::ecs::ServerToggleState",
       "index": 473,
       "size": 16
@@ -2297,6 +2635,11 @@
       "name": "keen::ecs::DynamicShelter",
       "index": 476,
       "size": 20
+    },
+    {
+      "name": "keen::ecs::ShroudForge",
+      "index": 477,
+      "size": 64
     },
     {
       "name": "keen::ecs::SignalReceiver",
@@ -2342,6 +2685,11 @@
       "name": "keen::ecs::SlotSelection",
       "index": 486,
       "size": 256
+    },
+    {
+      "name": "keen::ecs::SnappingBoxLocal",
+      "index": 487,
+      "size": 24
     },
     {
       "name": "keen::ecs::SnappingBoxReference",
@@ -2559,6 +2907,11 @@
       "size": 1
     },
     {
+      "name": "keen::ecs::TeleportZone",
+      "index": 531,
+      "size": 16
+    },
+    {
       "name": "keen::ecs::TeleportZoneConnection",
       "index": 532,
       "size": 8
@@ -2599,14 +2952,34 @@
       "size": 4
     },
     {
+      "name": "keen::ecs::ToggleAnimation",
+      "index": 540,
+      "size": 32
+    },
+    {
       "name": "keen::ecs::ToggleDelay",
       "index": 541,
       "size": 16
     },
     {
+      "name": "keen::ecs::ToggleImmunity",
+      "index": 542,
+      "size": 1
+    },
+    {
+      "name": "keen::ecs::ToggleInShape",
+      "index": 543,
+      "size": 1
+    },
+    {
       "name": "keen::ecs::ToggleNotifier",
       "index": 544,
       "size": 168
+    },
+    {
+      "name": "keen::ecs::ToggleOnHit",
+      "index": 545,
+      "size": 3
     },
     {
       "name": "keen::ecs::DynamicToggleSubEntities",
@@ -2694,6 +3067,11 @@
       "size": 2316
     },
     {
+      "name": "keen::ecs::UpgradableBuildingRange",
+      "index": 563,
+      "size": 1
+    },
+    {
       "name": "keen::ecs::DynamicUpgrade",
       "index": 564,
       "size": 12
@@ -2714,9 +3092,19 @@
       "size": 12
     },
     {
+      "name": "keen::ecs::VfxAnimationIdParameter",
+      "index": 568,
+      "size": 1
+    },
+    {
       "name": "keen::ecs::VfxComponent",
       "index": 569,
       "size": 52
+    },
+    {
+      "name": "keen::ecs::VfxComponentResource",
+      "index": 570,
+      "size": 16
     },
     {
       "name": "keen::ecs::VfxComponentVolatile",
@@ -2724,9 +3112,19 @@
       "size": 68
     },
     {
+      "name": "keen::ecs::VfxOnResourceDrop",
+      "index": 572,
+      "size": 48
+    },
+    {
       "name": "keen::ecs::VfxParametersOverwriteComponent",
       "index": 573,
       "size": 68
+    },
+    {
+      "name": "keen::ecs::VfxParametersTemplateComponent",
+      "index": 574,
+      "size": 80
     },
     {
       "name": "keen::ecs::VfxResourceDynamic",
@@ -2734,9 +3132,19 @@
       "size": 16
     },
     {
+      "name": "keen::ecs::VfxTargetParameter",
+      "index": 576,
+      "size": 48
+    },
+    {
       "name": "keen::ecs::VfxTargetedComponent",
       "index": 577,
       "size": 72
+    },
+    {
+      "name": "keen::ecs::VisualEquipment",
+      "index": 578,
+      "size": 1
     },
     {
       "name": "keen::ecs::VoxelModel",
@@ -2752,6 +3160,16 @@
       "name": "keen::ecs::VoxelModelVolatile",
       "index": 581,
       "size": 28
+    },
+    {
+      "name": "keen::ecs::WaterDispenser",
+      "index": 582,
+      "size": 8
+    },
+    {
+      "name": "keen::ecs::WaterDrain",
+      "index": 583,
+      "size": 4
     },
     {
       "name": "keen::ecs::WaterEffector",
@@ -2777,6 +3195,11 @@
       "name": "keen::ecs::WeaponSkill",
       "index": 588,
       "size": 44
+    },
+    {
+      "name": "keen::ecs::WeaponSkillChargeFx",
+      "index": 589,
+      "size": 60
     },
     {
       "name": "keen::ecs::WetDurationReduction",

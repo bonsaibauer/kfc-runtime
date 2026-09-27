@@ -67,7 +67,17 @@ bool Load() {
         component_offsets = offset("component_offsets"); component_strides = offset("component_strides");
         entity_id = offset("entity_id"); entity_generation = offset("entity_generation");
         entity_layout = offset("entity_layout"); entity_storage = offset("entity_storage");
-        entity_row = offset("entity_row"); component_bits = offset("component_bits"); lookup_manager = offset("lookup_manager");
+        entity_definition = offset("entity_definition"); entity_row = offset("entity_row");
+        component_bits = offset("component_bits"); lookup_manager = offset("lookup_manager");
+        const auto& definition_layout = selected.at("entityDefinition");
+        auto definition_offset = [&](const char* key) {
+            const auto value = definition_layout.at(key).get<std::size_t>();
+            if (value > 0x10000) throw std::runtime_error(std::string("entity definition offset out of range: ") + key);
+            return value;
+        };
+        definition_uuid = definition_offset("uuid");
+        definition_name = definition_offset("name");
+        definition_name_size = definition_offset("nameSize");
         const auto& hooks = selected.at("hooks");
         game_thread_signature = hooks.at("game_thread").at("signature").get<std::string>();
         entity_manager_signature = hooks.at("entity_manager").at("signature").get<std::string>();
@@ -175,10 +185,18 @@ bool Load() {
                 patch.name = item.key();
                 patch.signature = value.at("signature").get<std::string>();
                 patch.kind = value.at("kind").get<std::string>();
+                const auto& function = value.at("function");
+                patch.function_id = function.at("id").get<std::string>();
+                patch.function_begin_rva = function.at("beginRva").get<std::uintptr_t>();
+                patch.function_end_rva = function.at("endRva").get<std::uintptr_t>();
+                patch.target_offset = function.at("targetOffset").get<std::size_t>();
                 patch.overwrite = value.at("overwriteBytes").get<std::size_t>();
                 patch.payload = value.at("payload").get<std::vector<std::uint8_t>>();
                 patch.return_rel32_offset = value.value("returnRel32Offset", std::size_t{});
                 if (!patch.name.starts_with("runtime.patch.") || !patch_names.insert(patch.name).second ||
+                    patch.function_id.empty() || patch.function_id.size() > 128 ||
+                    patch.function_begin_rva >= patch.function_end_rva ||
+                    patch.target_offset >= patch.function_end_rva - patch.function_begin_rva ||
                     patch.signature.empty() || patch.signature.size() > 256 || patch.overwrite < 3 || patch.overwrite > 32 ||
                     patch.payload.empty() || patch.payload.size() > 256 ||
                     (patch.kind != "bytes" && patch.kind != "detour") ||
@@ -186,6 +204,9 @@ bool Load() {
                     (patch.kind == "detour" && (patch.return_rel32_offset < 1 || patch.return_rel32_offset + 4 > patch.payload.size() ||
                         patch.payload[patch.return_rel32_offset - 1] != 0xe9)))
                     throw std::runtime_error("invalid runtime patch profile entry: " + patch.name);
+                if (exact && (patch.function_end_rva > nt->OptionalHeader.SizeOfImage ||
+                    patch.function_begin_rva >= nt->OptionalHeader.SizeOfImage))
+                    throw std::runtime_error("runtime patch function range outside image: " + patch.name);
                 if (exact) runtime_patches.push_back(std::move(patch));
             }
         }

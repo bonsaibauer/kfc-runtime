@@ -18,6 +18,8 @@ namespace {
 struct PatchState {
     const ShroudforgeCompatibility::EnshroudedClient::RuntimePatch* profile{};
     std::uintptr_t target{};
+    std::uint32_t function_begin_rva{}, function_end_rva{};
+    std::size_t target_offset{};
     std::size_t signature_matches{};
     std::vector<std::uint8_t> original, replacement;
     void* trampoline{};
@@ -139,6 +141,21 @@ bool resolve(PatchState& state, std::uint8_t* base) {
         return false;
     }
     state.target = match.address;
+    const auto image_base = reinterpret_cast<std::uintptr_t>(base);
+    const auto actual_range = function_range(image_base, state.target);
+    if (!actual_range) {
+        state.status = "function-boundary-unavailable";
+        return false;
+    }
+    state.function_begin_rva = actual_range->first;
+    state.function_end_rva = actual_range->second;
+    state.target_offset = static_cast<std::size_t>((state.target - image_base) - actual_range->first);
+    if (state.function_begin_rva != spec.function_begin_rva ||
+        state.function_end_rva != spec.function_end_rva ||
+        state.target_offset != spec.target_offset) {
+        state.status = "function-association-mismatch";
+        return false;
+    }
     state.original.assign(reinterpret_cast<const std::uint8_t*>(match.address),
         reinterpret_cast<const std::uint8_t*>(match.address) + spec.overwrite);
     if (spec.kind == "bytes") {
@@ -226,17 +243,23 @@ std::string Diagnostics() {
     nlohmann::json rows = nlohmann::json::array();
     const auto image_base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     for (const auto& patch : patches) {
-        nlohmann::json function = nullptr;
-        if (patch.target && patch.target >= image_base) {
-            if (const auto range = function_range(image_base, patch.target))
-                function = {{"begin", range->first}, {"end", range->second}};
-        }
+        const auto& spec = *patch.profile;
+        const bool association_verified = patch.target && patch.function_begin_rva == spec.function_begin_rva &&
+            patch.function_end_rva == spec.function_end_rva && patch.target_offset == spec.target_offset;
         rows.push_back({{"name", patch.profile->name}, {"status", patch.status},
             {"resolved", patch.target != 0}, {"enabled", patch.enabled},
             {"signatureMatches", patch.signature_matches},
             {"targetRva", patch.target && patch.target >= image_base ?
                 nlohmann::json(patch.target - image_base) : nlohmann::json(nullptr)},
-            {"functionRva", std::move(function)},
+            {"functionRva", patch.target ? nlohmann::json{{"begin", patch.function_begin_rva},
+                {"end", patch.function_end_rva}} : nlohmann::json(nullptr)},
+            {"functionAssociation", {{"id", spec.function_id},
+                {"expectedBeginRva", spec.function_begin_rva}, {"expectedEndRva", spec.function_end_rva},
+                {"expectedTargetOffset", spec.target_offset}, {"actualBeginRva", patch.target ?
+                    nlohmann::json(patch.function_begin_rva) : nlohmann::json(nullptr)},
+                {"actualEndRva", patch.target ? nlohmann::json(patch.function_end_rva) : nlohmann::json(nullptr)},
+                {"actualTargetOffset", patch.target ? nlohmann::json(patch.target_offset) : nlohmann::json(nullptr)},
+                {"verified", association_verified}}},
             {"overwriteBytes", patch.original.size()}});
     }
     return rows.dump();
